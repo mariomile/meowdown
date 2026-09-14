@@ -6,7 +6,7 @@ import {
   isNodeOfType,
   markdownToDoc,
   type AcceptPendingReplacementOptions,
-  type EditorExtension,
+  type EditorConfig,
   type ExitBoundaryHandler,
   type FileClickHandler,
   type FileLinkResolver,
@@ -19,8 +19,6 @@ import {
   type LinkPreviewResolver,
   type MarkMode,
   type PlaceholderOptions,
-  type XPostResolver,
-  type YouTubeVideoResolver,
   type SearchStatusHandler,
   type StartPendingReplacementOptions,
   type TagClickHandler,
@@ -28,6 +26,8 @@ import {
   type WikiEmbedResolver,
   type WikilinkClickHandler,
   type WikilinkResolver,
+  type XPostResolver,
+  type YouTubeVideoResolver,
 } from '@meowdown/core'
 import { clamp } from '@ocavue/utils'
 import { createEditor, union, type SelectionJSON } from '@prosekit/core'
@@ -211,17 +211,17 @@ export interface ProseKitEditorProps {
   resolveImageUrl?: ImageOptions['resolveImageUrl']
 
   /**
-   * Claims links as file pills. Read once on mount; see `EditorProps.resolveFileLink`.
+   * Claims links as file pills. Updates existing content; see `EditorProps.resolveFileLink`.
    */
   resolveFileLink?: FileLinkResolver
 
   /**
-   * Classifies wiki embeds. Read once on mount; see `EditorProps.resolveWikiEmbed`.
+   * Classifies wiki embeds. Updates existing content; see `EditorProps.resolveWikiEmbed`.
    */
   resolveWikiEmbed?: WikiEmbedResolver
 
   /**
-   * Resolves wikilink targets and labels. Read once on mount; see `EditorProps.resolveWikilink`.
+   * Resolves wikilink targets and labels. Updates existing content; see `EditorProps.resolveWikilink`.
    */
   resolveWikilink?: WikilinkResolver
 
@@ -381,13 +381,81 @@ export function ProseKitEditor({
   ref,
   children,
 }: ProseKitEditorProps): ReactElement {
-  const [editor] = useState((): TypedEditor => {
-    const baseExtension: EditorExtension = defineEditorExtension({
+  // Set while a programmatic setState/setMarkdown dispatch runs, so the
+  // doc-change handler can ignore it: a host replacing content already knows.
+  const suppressDocChangeRef = useRef(false)
+
+  // Guard the host callback so programmatic setState/setMarkdown stays silent.
+  // Stable per `onDocChange` identity, so the extension is not rebuilt every render.
+  const handleDocChange = useMemo(() => {
+    if (!onDocChange) return
+    return () => {
+      if (suppressDocChangeRef.current) return
+      onDocChange()
+    }
+  }, [onDocChange])
+
+  const wikilinkEnabled = !!onWikilinkSearch
+
+  const config = useMemo<EditorConfig>(
+    () => ({
+      markMode,
       resolveFileLink,
       resolveWikiEmbed,
       resolveWikilink,
+      onWikilinkClick,
+      onLinkClick,
+      onTagClick,
+      onExitBoundary,
+      resolveImageUrl,
+      resolveFileInfo,
+      resolveXPost,
+      resolveYouTubeVideo,
+      onFileClick,
+      onFilePaste,
+      onFileSaveError,
+      onImageClick,
+      embedPaste,
+      linkPaste,
+      bulletAfterHeading,
+      substitution,
+      placeholder,
+      readOnly,
+      spellCheck,
+      editorClassName,
+      wikilinkEnabled,
+    }),
+    [
       markMode,
-    })
+      resolveFileLink,
+      resolveWikiEmbed,
+      resolveWikilink,
+      onWikilinkClick,
+      onLinkClick,
+      onTagClick,
+      onExitBoundary,
+      resolveImageUrl,
+      resolveFileInfo,
+      resolveXPost,
+      resolveYouTubeVideo,
+      onFileClick,
+      onFilePaste,
+      onFileSaveError,
+      onImageClick,
+      embedPaste,
+      linkPaste,
+      bulletAfterHeading,
+      substitution,
+      placeholder,
+      readOnly,
+      spellCheck,
+      editorClassName,
+      wikilinkEnabled,
+    ],
+  )
+
+  const [editor] = useState((): TypedEditor => {
+    const baseExtension = defineEditorExtension(config)
     const extension =
       CodeBlockView === false
         ? baseExtension
@@ -398,10 +466,6 @@ export function ProseKitEditor({
     }
     return editor
   })
-
-  // Set while a programmatic setState/setMarkdown dispatch runs, so the
-  // doc-change handler can ignore it: a host replacing content already knows.
-  const suppressDocChangeRef = useRef(false)
 
   // The selection the menu is open over, captured at open time so it survives
   // focus moving into the menu's filter input. Undefined while closed.
@@ -543,16 +607,6 @@ export function ProseKitEditor({
     }
   }, [editor, frontmatter, hasSelectionMenu, openSelectionMenu])
 
-  // Guard the host callback so programmatic setState/setMarkdown stays silent.
-  // Stable per `onDocChange` identity, so the extension is not rebuilt every render.
-  const handleDocChange = useMemo(() => {
-    if (!onDocChange) return
-    return () => {
-      if (suppressDocChangeRef.current) return
-      onDocChange()
-    }
-  }, [onDocChange])
-
   return (
     <ProseKit editor={editor}>
       {/* Before the editor element, so a document height change below the
@@ -560,31 +614,10 @@ export function ProseKitEditor({
       <VirtualCaret />
       <div ref={editor.mount}></div>
       <EditorExtensions
-        markMode={markMode}
-        onDocChange={handleDocChange}
-        onWikilinkClick={onWikilinkClick}
-        onLinkClick={onLinkClick}
-        onTagClick={onTagClick}
-        onExitBoundary={onExitBoundary}
-        resolveImageUrl={resolveImageUrl}
-        resolveFileInfo={resolveFileInfo}
-        resolveXPost={resolveXPost}
-        resolveYouTubeVideo={resolveYouTubeVideo}
-        onFileClick={onFileClick}
-        onFilePaste={onFilePaste}
-        onFileSaveError={onFileSaveError}
-        onImageClick={onImageClick}
-        embedPaste={embedPaste}
-        linkPaste={linkPaste}
-        bulletAfterHeading={bulletAfterHeading}
-        substitution={substitution}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        wikilinkEnabled={!!onWikilinkSearch}
-        spellCheck={spellCheck}
+        config={config}
         searchQuery={searchQuery}
+        onDocChange={handleDocChange}
         onSearchChange={onSearchChange}
-        editorClassName={editorClassName}
       />
       {blockHandle && !readOnly && <BlockHandle />}
       {!readOnly && <TableHandle />}

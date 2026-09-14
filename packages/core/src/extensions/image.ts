@@ -3,6 +3,7 @@ import { registerYouTubeVideo } from '@post-embed/elements/youtube'
 import type { XPost, YouTubeVideo } from '@post-embed/types'
 import { defineMarkView, type PlainExtension } from '@prosekit/core'
 import type { Mark } from '@prosekit/pm/model'
+import type { EditorState } from '@prosekit/pm/state'
 import type { EditorView, MarkView, ViewMutationRecord } from '@prosekit/pm/view'
 import {
   registerResizableHandleElement,
@@ -215,9 +216,9 @@ class ImageMarkView implements MarkView {
   readonly #dom: HTMLElement
   readonly #contentDOM: HTMLElement
   readonly #view: EditorView
-  readonly #resolveImageUrl: ImageUrlResolver | undefined
-  readonly #resolveXPost: XPostResolver
-  readonly #resolveYouTubeVideo: YouTubeVideoResolver
+  #resolveImageUrl: ImageUrlResolver | undefined
+  #resolveXPost: XPostResolver
+  #resolveYouTubeVideo: YouTubeVideoResolver
   #attrs: MdImageAttrs
   #resizableRoot: HTMLElement | undefined
   #image: HTMLImageElement | undefined
@@ -452,9 +453,11 @@ class ImageMarkView implements MarkView {
  * `![alt](src)<!-- {"width":320,"height":240} -->`, which round-trips as
  * plain Markdown.
  */
-export function defineImage(options: ImageOptions = {}): PlainExtension {
+export function defineImage(
+  getOptions?: (state: EditorState) => ImageOptions | undefined,
+): PlainExtension {
   return defineMarkView({
     name: 'mdImage' satisfies MarkName,
-    constructor: (mark, view) => new ImageMarkView(mark, view, options),
+    constructor: (mark, view) => new ImageMarkView(mark, view, getOptions?.(view.state) ?? {}),
   }) as PlainExtension
 }

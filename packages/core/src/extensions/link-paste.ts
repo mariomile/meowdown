@@ -1,6 +1,6 @@
 import { getAutolinkHref } from '@meowdown/markdown'
 import { definePlugin, Priority, withPriority, type PlainExtension } from '@prosekit/core'
-import { Plugin, PluginKey } from '@prosekit/pm/state'
+import { Plugin, PluginKey, type EditorState } from '@prosekit/pm/state'
 
 import { executeCommand } from '../utils/execute-command.ts'
 
@@ -30,16 +30,17 @@ export function detectLinkUrl(text: string): string | undefined {
  * Registered with `Priority.high` so its `handlePaste` runs before
  * `defineEmbedPaste`'s: pasting an embeddable URL (tweet/YouTube) over a
  * selection keeps the selected text as a link instead of discarding it for an
- * embed. Not part of `defineEditorExtension`; the React package applies it via
- * the `linkPaste` prop (on by default).
+ * embed. Enable it through the `linkPaste` configuration or install this
+ * standalone extension.
  */
-export function defineLinkPaste(): PlainExtension {
+export function defineLinkPaste(enabled?: (state: EditorState) => boolean): PlainExtension {
   return withPriority(
     definePlugin(
       new Plugin({
         key: linkPasteKey,
         props: {
           handlePaste: (view, event, slice) => {
+            if (enabled && !enabled(view.state)) return false
             const text = getPastedText(event, slice)
             if (!text) return false
             const href = detectLinkUrl(text)

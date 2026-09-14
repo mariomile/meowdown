@@ -13,8 +13,7 @@ import {
   type Fixture,
 } from '../testing/index.ts'
 
-import { defineImageClickHandler, type ImageClickHandler } from './image-click.ts'
-import { defineImage } from './image.ts'
+import type { ImageClickHandler } from './image-click.ts'
 import type { MarkMode } from './mark-mode.ts'
 
 const pmRoot = page.locate('.ProseMirror')
@@ -30,9 +29,10 @@ function getSVGImageURL(width: number, height: number): string {
 
 // An editor showing the image in the given mark mode.
 function setup(mode: MarkMode, text: string): Fixture {
-  const fixture = setupFixture({ extensionOptions: { markMode: mode } })
-  const { editor, n } = fixture
-  editor.use(defineImage({ resolveImageUrl: () => getSVGImageURL(10, 10) }))
+  const fixture = setupFixture({
+    extensionOptions: { markMode: mode, resolveImageUrl: () => getSVGImageURL(10, 10) },
+  })
+  const { n } = fixture
   fixture.set(n.doc(n.paragraph(text)))
   fixture.view.focus()
   return fixture
@@ -131,10 +131,10 @@ describe('image selection ring', () => {
 describe('image click callback', () => {
   // Render `markdown` with a click handler attached, showing http(s) images as-is.
   function setupClickable(markdown: string, onImageClick: ImageClickHandler): Fixture {
-    const fixture = setupFixture()
-    const { editor, n } = fixture
-    editor.use(defineImage({ resolveImageUrl: (src) => src }))
-    editor.use(defineImageClickHandler(onImageClick))
+    const fixture = setupFixture({
+      extensionOptions: { onImageClick, resolveImageUrl: (src) => src },
+    })
+    const { n } = fixture
     fixture.set(n.doc(n.paragraph(markdown)))
     return fixture
   }
@@ -313,9 +313,10 @@ describe('image resize', () => {
   const resizable = pmRoot.getByTestId('image-resizable')
 
   function setupResize(markdown: string, url = getSVGImageURL(10, 10)): Fixture {
-    const fixture = setupFixture({ extensionOptions: { markMode: 'hide' } })
-    const { editor, n } = fixture
-    editor.use(defineImage({ resolveImageUrl: () => url }))
+    const fixture = setupFixture({
+      extensionOptions: { markMode: 'hide', resolveImageUrl: () => url },
+    })
+    const { n } = fixture
     fixture.set(n.doc(n.paragraph(markdown)))
     return fixture
   }
@@ -494,10 +495,10 @@ describe('wiki image resize', () => {
       extensionOptions: {
         markMode: 'hide',
         resolveWikiEmbed: () => ({ kind: 'image' }),
+        resolveImageUrl: () => getSVGImageURL(20, 10),
       },
     })
-    const { editor, n } = fixture
-    editor.use(defineImage({ resolveImageUrl: () => getSVGImageURL(20, 10) }))
+    const { n } = fixture
     fixture.set(n.doc(n.paragraph(markdown)))
     return fixture
   }

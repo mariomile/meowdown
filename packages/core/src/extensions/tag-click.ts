@@ -51,12 +51,22 @@ export type TagClickHandler = (payload: TagClickPayload) => void
  * `Mod-Enter` with the caret on one. The `tag` is read from the rendered text
  * without the leading `#`.
  */
-export function defineTagClickHandler(onClick: TagClickHandler): PlainExtension {
+export function defineTagClickHandler(
+  getOnClick?: (state: EditorState) => TagClickHandler | undefined,
+): PlainExtension {
   return defineMarkClickHandler<string>({
     key: tagClickKey,
+    enabled: (state) => !!getOnClick?.(state),
     selector: '.md-tag',
     preventDefault: false,
     findPayloadAt: (state, pos) => findTagAt(state, pos)?.tag,
-    onClick: (tag, event) => onClick({ tag, event, mod: isModEvent(event) }),
+    onClick: (tag, event, state) => {
+      const onClick = getOnClick?.(state)
+      return onClick?.({
+        tag,
+        event,
+        mod: isModEvent(event),
+      })
+    },
   })
 }

@@ -1,5 +1,6 @@
 import '../testing/index.ts'
 
+import { getEditorConfig } from '@meowdown/core'
 import { createRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
@@ -146,5 +147,40 @@ describe('ProseKitEditor', () => {
       expect(onDocChange).toHaveBeenCalledTimes(1)
     })
     expect(ref.current?.getMarkdown()).toBe('World!\n')
+  })
+})
+
+describe('reactive editor configuration', () => {
+  it('updates the callback without replacing editor state', async () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const ref = createRef<EditorHandle>()
+    const screen = await render(
+      <ProseKitEditor
+        ref={ref}
+        initialMarkdown={'about #cats\n\nOther paragraph'}
+        onTagClick={first}
+      />,
+    )
+    await userEvent.click(pmRoot.getByText('#cats'))
+    expect(first).toHaveBeenCalledOnce()
+    await userEvent.click(pmRoot.getByText('Other paragraph'))
+    const editor = ref.current?.editor
+    expect(editor).toBeDefined()
+    const state = editor?.state
+    await screen.rerender(
+      <ProseKitEditor
+        ref={ref}
+        initialMarkdown={'about #cats\n\nOther paragraph'}
+        onTagClick={second}
+      />,
+    )
+    await vi.waitFor(() => {
+      expect(editor && getEditorConfig(editor.state).onTagClick).toBe(second)
+    })
+    expect(editor?.state).toBe(state)
+    await userEvent.click(pmRoot.getByText('#cats'))
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
   })
 })

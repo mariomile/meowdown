@@ -77,11 +77,15 @@ function canMoveVertically(view: EditorView, direction: 1 | -1): boolean {
   return canMoveBlockwise(state, direction)
 }
 
-function createExitBoundaryPlugin(onExitBoundary: ExitBoundaryHandler) {
+function createExitBoundaryPlugin(
+  getExitBoundaryHandler?: (state: EditorState) => ExitBoundaryHandler | undefined,
+) {
   return new Plugin({
     key: exitBoundaryKey,
     props: {
       handleKeyDown: (view, event) => {
+        const handler = getExitBoundaryHandler?.(view.state)
+        if (!handler) return false
         if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
           return false
         }
@@ -90,7 +94,7 @@ function createExitBoundaryPlugin(onExitBoundary: ExitBoundaryHandler) {
         if (!dir) return false
 
         if (canMoveVertically(view, dir)) return false
-        const result = onExitBoundary({ direction: dir < 0 ? 'up' : 'down', event })
+        const result = handler({ direction: dir < 0 ? 'up' : 'down', event })
         if (result === false) return false
         return true
       },
@@ -101,6 +105,8 @@ function createExitBoundaryPlugin(onExitBoundary: ExitBoundaryHandler) {
 /**
  * Call `onExitBoundary` when an arrow key press would leave the document boundary.
  */
-export function defineExitBoundaryHandler(onExitBoundary: ExitBoundaryHandler): PlainExtension {
-  return withPriority(definePlugin(createExitBoundaryPlugin(onExitBoundary)), Priority.low)
+export function defineExitBoundaryHandler(
+  getExitBoundaryHandler?: (state: EditorState) => ExitBoundaryHandler | undefined,
+): PlainExtension {
+  return withPriority(definePlugin(createExitBoundaryPlugin(getExitBoundaryHandler)), Priority.low)
 }

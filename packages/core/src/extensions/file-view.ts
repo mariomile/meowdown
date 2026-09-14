@@ -1,5 +1,6 @@
 import { defineMarkView, type PlainExtension } from '@prosekit/core'
 import type { Mark } from '@prosekit/pm/model'
+import type { EditorState } from '@prosekit/pm/state'
 import type { MarkView, ViewMutationRecord } from '@prosekit/pm/view'
 
 import { formatFileSize } from '../utils/format-file-size.ts'
@@ -118,7 +119,7 @@ class FileMarkView implements MarkView {
   #attrs: MdFileAttrs
   #destroyed = false
 
-  constructor(mark: Mark, options: FileViewOptions) {
+  constructor(mark: Mark, options?: FileViewOptions) {
     this.#attrs = mark.attrs as MdFileAttrs
 
     this.#dom = document.createElement('span')
@@ -149,7 +150,7 @@ class FileMarkView implements MarkView {
     this.#contentDOM.className = 'md-file-view-content md-atom-view-content'
     this.#dom.appendChild(this.#contentDOM)
 
-    void this.#loadFileInfo(options.resolveFileInfo)
+    void this.#loadFileInfo(options?.resolveFileInfo)
   }
 
   get dom(): HTMLElement {
@@ -184,9 +185,8 @@ class FileMarkView implements MarkView {
 
   /**
    * Fill the size slot once the host resolves it. The `href` of one view
-   * instance never changes (`update` rebuilds on an href change), so at most
-   * one resolve is in flight and `#destroyed` is the only guard a late
-   * result needs.
+   * instance never changes (`update` rebuilds on an href change).
+   * Destruction also prevents a late result from updating the preview.
    */
   async #loadFileInfo(resolveFileInfo: FileInfoResolver | undefined): Promise<void> {
     if (!resolveFileInfo) return
@@ -210,9 +210,11 @@ class FileMarkView implements MarkView {
  * `resolveFileInfo` supplies it. The pill never loads the file's content;
  * clicks are reported through `defineFileClickHandler`.
  */
-export function defineFileView(options: FileViewOptions = {}): PlainExtension {
+export function defineFileView(
+  getOptions?: (state: EditorState) => FileViewOptions,
+): PlainExtension {
   return defineMarkView({
     name: 'mdFile' satisfies MarkName,
-    constructor: (mark) => new FileMarkView(mark, options),
+    constructor: (mark, view) => new FileMarkView(mark, getOptions?.(view.state)),
   }) as PlainExtension
 }

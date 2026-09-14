@@ -6,19 +6,14 @@ import { setupFixture, type Fixture } from '../testing/index.ts'
 import { createXPost } from '../testing/x-post-fixture.ts'
 import { createYouTubeVideo } from '../testing/youtube-fixture.ts'
 
-import { defineEmbedPaste } from './embed-paste.ts'
-import { defineImage } from './image.ts'
-import { defineLinkPaste, detectLinkUrl } from './link-paste.ts'
+import type { ImageOptions } from './image.ts'
+import { detectLinkUrl } from './link-paste.ts'
 
 const pmRoot = page.locate('.ProseMirror')
 const youtubeEmbed = pmRoot.getByTestId('youtube-video-embed')
 
 const LINK = 'https://example.com/page'
 const YT = 'https://youtu.be/aqz-KE-bpKQ'
-
-function useLinkPaste(fixture: Fixture): void {
-  fixture.editor.use(defineLinkPaste())
-}
 
 describe('detectLinkUrl', () => {
   it.each([
@@ -50,18 +45,16 @@ describe('detectLinkUrl', () => {
 
 describe('paste a URL over a selection', () => {
   it('wraps the selected text as a markdown link', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('pick <a>this phrase<b> please')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`pick [this phrase](${LINK}) please`)
   })
 
   it('leaves the caret after the closing paren', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>label<b>')))
     pasteText(view, LINK)
     const { selection } = fixture.state
@@ -70,36 +63,32 @@ describe('paste a URL over a selection', () => {
   })
 
   it('normalizes a www URL to an https href', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>site<b>')))
     pasteText(view, 'www.example.com')
     expect(editor.state.doc.textContent).toBe('[site](https://www.example.com)')
   })
 
   it('links a custom scheme URI', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>my note<b>')))
     pasteText(view, 'x-custom-schema://ABCD-1234')
     expect(editor.state.doc.textContent).toBe('[my note](x-custom-schema://ABCD-1234)')
   })
 
   it('wraps only the trimmed selection, keeping edge whitespace as text', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('a<a> mid <b>b')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`a [mid](${LINK}) b`)
   })
 
   it('one undo restores the plain selected text', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('pick <a>this<b> please')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`pick [this](${LINK}) please`)
@@ -110,36 +99,32 @@ describe('paste a URL over a selection', () => {
 
 describe('falls through to a plain paste', () => {
   it('with an empty selection', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('before <a>')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`before ${LINK}`)
   })
 
   it('when the selection spans two blocks', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('one <a>two'), n.paragraph('three<b> four')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`one ${LINK} four`)
   })
 
   it('inside a code block', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.codeBlock({ language: 'js' }, 'const <a>x<b> = 1')))
     pasteText(view, LINK)
     expect(editor.state.doc.textContent).toBe(`const ${LINK} = 1`)
   })
 
   it('when the clipboard is not a lone URL', () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { linkPaste: true } })
     const { editor, n, view } = fixture
-    useLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>gone<b>')))
     pasteText(view, `read ${LINK}`)
     expect(editor.state.doc.textContent).toBe(`read ${LINK}`)
@@ -147,25 +132,22 @@ describe('falls through to a plain paste', () => {
 })
 
 describe('ordering against embed paste', () => {
-  function useEmbedThenLinkPaste(fixture: Fixture): void {
-    const { editor } = fixture
-    editor.use(
-      defineImage({
-        resolveImageUrl: (src) => src,
-        resolveXPost: () => createXPost(),
-        resolveYouTubeVideo: () => createYouTubeVideo(),
-      }),
-    )
+  function setupEmbedThenLinkPaste(): Fixture {
+    const imageOptions: ImageOptions = {
+      resolveImageUrl: (src) => src,
+      resolveXPost: () => createXPost(),
+      resolveYouTubeVideo: () => createYouTubeVideo(),
+    }
     // Embed paste registered first: without `Priority.high` on link paste,
     // its `handlePaste` would win and the selection would be discarded.
-    editor.use(defineEmbedPaste())
-    editor.use(defineLinkPaste())
+    return setupFixture({
+      extensionOptions: { linkPaste: true, embedPaste: true, ...imageOptions },
+    })
   }
 
   it('an embeddable URL pasted over a selection becomes a link, not an embed', async () => {
-    using fixture = setupFixture()
+    using fixture = setupEmbedThenLinkPaste()
     const { editor, n, view } = fixture
-    useEmbedThenLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>talk<b>')))
     pasteText(view, YT)
     expect(editor.state.doc.textContent).toBe(`[talk](${YT})`)
@@ -173,9 +155,8 @@ describe('ordering against embed paste', () => {
   })
 
   it('an embeddable URL pasted at a caret still embeds', async () => {
-    using fixture = setupFixture()
+    using fixture = setupEmbedThenLinkPaste()
     const { editor, n, view } = fixture
-    useEmbedThenLinkPaste(fixture)
     fixture.set(n.doc(n.paragraph('<a>')))
     pasteText(view, YT)
     expect(editor.state.doc.textContent).toBe(`![](${YT})`)

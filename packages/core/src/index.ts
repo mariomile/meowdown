@@ -5,7 +5,7 @@ export {
   type CodeBlockAttrs,
 } from '@prosekit/extensions/code-block'
 export { definePlaceholder, type PlaceholderOptions } from '@prosekit/extensions/placeholder'
-export { defineReadonly } from '@prosekit/extensions/readonly'
+export { defineReadonly } from './extensions/readonly.ts'
 export {
   defineSearchStatusHandler,
   getSearchStatus,
@@ -27,6 +27,9 @@ export {
 } from './extensions/code-block-highlight.ts'
 export { codeBlockLanguages, type LanguageItem } from './extensions/code-block-languages.ts'
 export type { CodeBlockFenceStyle, MeowdownCodeBlockAttrs } from './extensions/code-block.ts'
+export { getEditorConfig } from './extensions/editor-config-getter.ts'
+export type { EditorConfig } from './extensions/editor-config-types.ts'
+export { updateEditorConfig } from './extensions/editor-config.ts'
 export { defineEmbedPaste } from './extensions/embed-paste.ts'
 export {
   defineExitBoundaryHandler,

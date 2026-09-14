@@ -1,5 +1,5 @@
 import type { PlainExtension } from '@prosekit/core'
-import { PluginKey } from '@prosekit/pm/state'
+import { PluginKey, type EditorState } from '@prosekit/pm/state'
 
 import { isModEvent } from '../utils/is-mod-event.ts'
 
@@ -34,12 +34,22 @@ export type LinkCopyHandler = (payload: LinkCopyPayload) => void
  * (`[text](url)`), or presses `Mod-Enter` with the caret on one. The `event`
  * is the originating `MouseEvent` or `KeyboardEvent`.
  */
-export function defineLinkClickHandler(onClick: LinkClickHandler): PlainExtension {
+export function defineLinkClickHandler(
+  getOnClick?: (state: EditorState) => LinkClickHandler | undefined,
+): PlainExtension {
   return defineMarkClickHandler<string>({
     key: linkClickKey,
+    enabled: (state) => !!getOnClick?.(state),
     selector: '.md-link',
     preventDefault: true,
     findPayloadAt: (state, pos) => getLinkUnitAt(state, pos)?.href,
-    onClick: (href, event) => onClick({ href, event, mod: isModEvent(event) }),
+    onClick: (href, event, state) => {
+      const onClick = getOnClick?.(state)
+      return onClick?.({
+        href,
+        event,
+        mod: isModEvent(event),
+      })
+    },
   })
 }

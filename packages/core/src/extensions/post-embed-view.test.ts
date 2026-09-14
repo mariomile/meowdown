@@ -9,8 +9,8 @@ import { createTweet } from '../testing/tweet-fixture.ts'
 import { createXPost } from '../testing/x-post-fixture.ts'
 import { createYouTubeVideo } from '../testing/youtube-fixture.ts'
 
-import { defineEmbedPaste } from './embed-paste.ts'
-import { defineImage, type ImageOptions } from './image.ts'
+import { updateEditorConfig } from './editor-config.ts'
+import type { ImageOptions } from './image.ts'
 import { formatMagicComment, parseMagicComment } from './magic-comment.ts'
 
 const pmRoot = page.locate('.ProseMirror')
@@ -25,9 +25,8 @@ const VIDEO = '![](https://www.youtube.com/watch?v=aqz-KE-bpKQ)'
 
 // An editor whose post embeds load through the given resolvers.
 function setup(markdown: string, options: ImageOptions): Fixture {
-  const fixture = setupFixture()
-  const { editor, n } = fixture
-  editor.use(defineImage(options))
+  const fixture = setupFixture({ extensionOptions: options })
+  const { n } = fixture
   fixture.set(n.doc(n.paragraph(markdown)))
   return fixture
 }
@@ -175,11 +174,10 @@ describe('snapshot persistence', () => {
   // that inserted the image maps over it and removes the snapshot too. An
   // insertion at the range end would leave the comment behind as plain text.
   it('undoing the paste that inserted the image removes the snapshot with it', async () => {
-    using fixture = setupFixture()
+    using fixture = setupFixture({ extensionOptions: { resolveXPost: () => post } })
     const { editor, n, view } = fixture
-    editor.use(defineImage({ resolveXPost: () => post }))
-    editor.use(defineEmbedPaste())
     fixture.set(n.doc(n.paragraph('<a>')))
+    updateEditorConfig(editor, { embedPaste: true })
     const url = 'https://x.com/jack/status/20'
     pasteText(view, url)
     await expect.poll(() => docToMarkdown(editor.state.doc)).toContain('"snapshot"')
