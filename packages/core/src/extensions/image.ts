@@ -296,6 +296,7 @@ class ImageMarkView implements MarkView {
     const kind = matchPostEmbed(src)
     if (kind) {
       wrapper.dataset.testid = `${kind}-embed`
+      wrapper.dataset.postEmbed = kind
       wrapper.appendChild(this.#buildPostEmbed(kind, src))
       return wrapper
     }

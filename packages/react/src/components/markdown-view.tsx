@@ -313,6 +313,7 @@ function PostEmbed(props: {
       className="md-image-view-preview md-atom-view-preview"
       contentEditable={false}
       data-testid={`${kind}-embed`}
+      data-post-embed={kind}
     >
       {kind === 'x-post'
         ? createElement('post-embed-x-post', {

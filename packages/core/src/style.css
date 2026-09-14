@@ -942,6 +942,10 @@
       outline-offset: 2px;
     }
 
+    .md-image-view-preview[data-post-embed] {
+      border-radius: var(--post-embed-radius, 1rem);
+    }
+
     .md-image-resizable {
       position: relative;
       display: inline-block;
