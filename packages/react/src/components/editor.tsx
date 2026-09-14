@@ -219,12 +219,15 @@ export interface EditorProps {
   resolveFileInfo?: FileViewOptions['resolveFileInfo']
 
   /**
-   * Resolves the data behind an X post URL, directly or as a promise; the post
-   * renders as a `post-embed-x-post` card. Defaults to `defaultResolveXPost`,
-   * which fetches through react-tweet's hosted proxy. Pass a stable function
-   * (e.g. from `useCallback`).
+   * Resolve the data behind an X post URL.
+   * Keep the function stable (for example, with `useCallback`). When omitted, public
+   * posts use `defaultResolveXPost` through react-tweet's hosted proxy.
    */
   resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
 
   /**
    * Resolves the data behind a YouTube video URL, directly or as a promise;
@@ -400,6 +403,7 @@ export function MeowdownEditor({
   resolveWikilink,
   resolveFileInfo,
   resolveXPost,
+  mediaUrlProtocols,
   resolveYouTubeVideo,
   onFileClick,
   onFilePaste,
@@ -540,6 +544,7 @@ export function MeowdownEditor({
         resolveWikilink={resolveWikilink}
         resolveFileInfo={resolveFileInfo}
         resolveXPost={resolveXPost}
+        mediaUrlProtocols={mediaUrlProtocols}
         resolveYouTubeVideo={resolveYouTubeVideo}
         onFileClick={onFileClick}
         onFilePaste={onFilePaste}

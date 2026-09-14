@@ -234,6 +234,10 @@ export interface ProseKitEditorProps {
    */
   resolveXPost?: XPostResolver
   /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  /**
    * Resolves the data behind a YouTube video URL. See `EditorProps.resolveYouTubeVideo`.
    */
   resolveYouTubeVideo?: YouTubeVideoResolver
@@ -359,6 +363,7 @@ export function ProseKitEditor({
   resolveWikilink,
   resolveFileInfo,
   resolveXPost,
+  mediaUrlProtocols,
   resolveYouTubeVideo,
   onFileClick,
   onFilePaste,
@@ -410,6 +415,7 @@ export function ProseKitEditor({
       resolveImageUrl,
       resolveFileInfo,
       resolveXPost,
+      mediaUrlProtocols,
       resolveYouTubeVideo,
       onFileClick,
       onFilePaste,
@@ -437,6 +443,7 @@ export function ProseKitEditor({
       resolveImageUrl,
       resolveFileInfo,
       resolveXPost,
+      mediaUrlProtocols,
       resolveYouTubeVideo,
       onFileClick,
       onFilePaste,

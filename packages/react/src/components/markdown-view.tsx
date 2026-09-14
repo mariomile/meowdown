@@ -161,6 +161,10 @@ export interface MarkdownViewProps {
    */
   resolveXPost?: XPostResolver
   /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  /**
    * Resolve the data behind a YouTube video URL, rendered as a
    * `post-embed-youtube-video` card. Defaults to `defaultResolveYouTubeVideo`.
    */
@@ -204,6 +208,10 @@ interface BlockContext {
   resolveWikilink?: WikilinkResolver
   resolveFileInfo?: FileInfoResolver
   resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
   resolveYouTubeVideo?: YouTubeVideoResolver
   onWikilinkClick?: WikilinkClickHandler
   onLinkClick?: LinkClickHandler
@@ -298,10 +306,14 @@ function PostEmbed(props: {
   src: string
   width: number | null
   snapshot: object | null
-  resolveXPost: XPostResolver
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
   resolveYouTubeVideo: YouTubeVideoResolver
 }): ReactElement {
-  const { kind, src, width, snapshot, resolveXPost, resolveYouTubeVideo } = props
+  const { kind, src, width, snapshot, resolveXPost, mediaUrlProtocols, resolveYouTubeVideo } = props
   // Registration is idempotent and must precede the element so React sets
   // `data`, `url`, and `resolver` as properties of the upgraded element.
   registerXPost()
@@ -317,9 +329,10 @@ function PostEmbed(props: {
     >
       {kind === 'x-post'
         ? createElement('post-embed-x-post', {
-            data: saved?.kind === 'x-post' ? saved.data : null,
+            data: null,
             url: src,
-            resolver: resolveXPost,
+            resolver: resolveXPost ?? defaultResolveXPost,
+            mediaUrlProtocols: mediaUrlProtocols ?? null,
           })
         : createElement('post-embed-youtube-video', {
             data: saved?.kind === 'youtube-video' ? saved.data : null,
@@ -341,6 +354,10 @@ function ImagePreview(props: {
   snapshot: object | null
   resolveImageUrl?: (src: string) => string | undefined
   resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
   resolveYouTubeVideo?: YouTubeVideoResolver
   onImageClick?: ImageClickHandler
   interactive: boolean
@@ -352,6 +369,7 @@ function ImagePreview(props: {
     snapshot,
     resolveImageUrl,
     resolveXPost,
+    mediaUrlProtocols,
     resolveYouTubeVideo,
     onImageClick,
     interactive,
@@ -366,7 +384,8 @@ function ImagePreview(props: {
         src={src}
         width={width}
         snapshot={snapshot}
-        resolveXPost={resolveXPost ?? defaultResolveXPost}
+        resolveXPost={resolveXPost}
+        mediaUrlProtocols={mediaUrlProtocols}
         resolveYouTubeVideo={resolveYouTubeVideo ?? defaultResolveYouTubeVideo}
       />
     )
@@ -418,6 +437,7 @@ function ImageView(props: {
         snapshot={snapshot}
         resolveImageUrl={context.resolveImageUrl}
         resolveXPost={context.resolveXPost}
+        mediaUrlProtocols={context.mediaUrlProtocols}
         resolveYouTubeVideo={context.resolveYouTubeVideo}
         onImageClick={context.onImageClick}
         interactive={context.interactive}
@@ -947,6 +967,7 @@ export function MarkdownView({
   resolveWikilink,
   resolveFileInfo,
   resolveXPost,
+  mediaUrlProtocols,
   resolveYouTubeVideo,
   onWikilinkClick,
   onLinkClick,
@@ -965,6 +986,7 @@ export function MarkdownView({
       resolveWikilink,
       resolveFileInfo,
       resolveXPost,
+      mediaUrlProtocols,
       resolveYouTubeVideo,
       onWikilinkClick: interactive ? onWikilinkClick : undefined,
       onLinkClick: interactive ? onLinkClick : undefined,
@@ -981,6 +1003,7 @@ export function MarkdownView({
       resolveWikilink,
       resolveFileInfo,
       resolveXPost,
+      mediaUrlProtocols,
       resolveYouTubeVideo,
       onWikilinkClick,
       onLinkClick,

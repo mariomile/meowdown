@@ -30,8 +30,7 @@ function getSVGImageURL(width: number, height: number): string {
 function setup(mode: MarkMode, paragraphs: string[]): Fixture {
   const imageOptions: ImageOptions = {
     resolveImageUrl: () => getSVGImageURL(24, 24),
-    // No snapshot: a resolved one is written back into the source, which
-    // would put its JSON into every traced selection below.
+    // Keep the card unavailable while tracing navigation selections.
     resolveXPost: () => undefined,
     resolveYouTubeVideo: () => undefined,
   }

@@ -1,5 +1,4 @@
 import type { XPost } from '@post-embed/types'
-import { pasteText } from '@prosekit/core/test'
 import { describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 
@@ -9,7 +8,6 @@ import { createTweet } from '../testing/tweet-fixture.ts'
 import { createXPost } from '../testing/x-post-fixture.ts'
 import { createYouTubeVideo } from '../testing/youtube-fixture.ts'
 
-import { updateEditorConfig } from './editor-config.ts'
 import type { ImageOptions } from './image.ts'
 import { formatMagicComment, parseMagicComment } from './magic-comment.ts'
 
@@ -32,6 +30,21 @@ function setup(markdown: string, options: ImageOptions): Fixture {
 }
 
 describe('X post embed', () => {
+  it('passes separate resolver and media protocol options to X cards', async () => {
+    const post = createXPost()
+    post.media = [
+      { type: 'photo', url: 'reflect-asset://saved/photo.png', width: 100, height: 100 },
+    ]
+    using fixture = setup(TWEET, {
+      resolveXPost: () => post,
+      mediaUrlProtocols: ['reflect-asset:'],
+    })
+    void fixture
+    await expect
+      .element(xPostCard.locate('[data-media] img'))
+      .toHaveAttribute('src', 'reflect-asset://saved/photo.png')
+  })
+
   it('renders the resolved post as a card with selectable text', async () => {
     using fixture = setup(TWEET, { resolveXPost: () => createXPost() })
     void fixture
@@ -64,7 +77,11 @@ describe('X post embed', () => {
   it('fetches through the default resolver when none is configured', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ data: createTweet('fetched by default') })))
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: { ...createTweet('fetched by default'), id_str: '2001' } }),
+        ),
+      )
     try {
       using fixture = setup('![](https://x.com/jack/status/2001)', {})
       void fixture
@@ -101,10 +118,7 @@ describe('YouTube video embed', () => {
   })
 })
 
-// The first resolved snapshot is written into the image's magic comment as
-// `{"snapshot":{"kind":...,"data":{...}}}`; a saved snapshot renders in the
-// first frame and never calls the resolver.
-describe('snapshot persistence', () => {
+describe('host data and snapshot persistence', () => {
   const post = createXPost('a -- b')
   const saved = `${TWEET}${formatMagicComment({ snapshot: { kind: 'x-post', data: post } })}`
 
@@ -117,38 +131,17 @@ describe('snapshot persistence', () => {
     return { markdown, comment, snapshot: parseMagicComment(comment)?.snapshot }
   }
 
-  it('writes the resolved snapshot back, escaped, outside history', async () => {
-    using fixture = setup(TWEET, { resolveXPost: () => Promise.resolve(post) })
-    const { editor } = fixture
-    await expect.element(xPostCard.getByText('a -- b')).toBeInTheDocument()
-    await expect
-      .poll(() => written(fixture, TWEET).snapshot)
-      .toEqual({ kind: 'x-post', data: post })
-    const { markdown, comment } = written(fixture, TWEET)
-    expect(comment.slice('<!--'.length, -'-->'.length)).not.toContain('--')
-
-    editor.commands.undo()
-    expect(docToMarkdown(editor.state.doc).trim()).toBe(markdown)
-  })
-
-  it('renders a saved snapshot without calling the resolver', async () => {
-    const resolveXPost = vi.fn(() => createXPost())
-    using fixture = setup(saved, { resolveXPost })
-    void fixture
-    await expect.element(xPostCard.getByText('a -- b')).toBeInTheDocument()
-    expect(resolveXPost).not.toHaveBeenCalled()
-    expect(xPostCard.locate('[data-fallback]').query()).toBeNull()
-  })
-
-  it('replaces a snapshot that does not validate', async () => {
-    using fixture = setup(`${TWEET}<!-- {"snapshot":{"kind":"x-post","data":{"bogus":1}}} -->`, {
-      resolveXPost: () => createXPost(),
-    })
-    await expect.element(xPostCard.getByText('just setting up my twttr')).toBeInTheDocument()
-    await expect
-      .poll(() => written(fixture, TWEET).snapshot)
-      .toEqual({ kind: 'x-post', data: createXPost() })
-  })
+  it.each([TWEET, saved, `${TWEET}<!-- {"snapshot":{"kind":"x-post","data":{"bogus":1}}} -->`])(
+    'renders host data without rewriting source Markdown: %s',
+    async (source) => {
+      const resolve = vi.fn(() => createXPost('Current host data'))
+      using fixture = setup(source, { resolveXPost: resolve })
+      const before = docToMarkdown(fixture.editor.state.doc).trim()
+      await expect.element(xPostCard.getByText('Current host data')).toBeInTheDocument()
+      expect(resolve).toHaveBeenCalledOnce()
+      expect(docToMarkdown(fixture.editor.state.doc).trim()).toBe(before)
+    },
+  )
 
   it('replaces a snapshot whose kind does not match the URL', async () => {
     const resolveYouTubeVideo = vi.fn(() => createYouTubeVideo())
@@ -168,24 +161,6 @@ describe('snapshot persistence', () => {
     const { editor } = fixture
     await expect.element(xPostCard.locate('[data-fallback]')).toBeInTheDocument()
     expect(docToMarkdown(editor.state.doc).trim()).toBe(TWEET)
-  })
-
-  // The write-back replaces the whole image range, so the undo of the paste
-  // that inserted the image maps over it and removes the snapshot too. An
-  // insertion at the range end would leave the comment behind as plain text.
-  it('undoing the paste that inserted the image removes the snapshot with it', async () => {
-    using fixture = setupFixture({ extensionOptions: { resolveXPost: () => post } })
-    const { editor, n, view } = fixture
-    fixture.set(n.doc(n.paragraph('<a>')))
-    updateEditorConfig(editor, { embedPaste: true })
-    const url = 'https://x.com/jack/status/20'
-    pasteText(view, url)
-    await expect.poll(() => docToMarkdown(editor.state.doc)).toContain('"snapshot"')
-
-    editor.commands.undo()
-    expect(editor.state.doc.textContent).toBe(url)
-    editor.commands.undo()
-    expect(editor.state.doc.textContent).toBe('')
   })
 })
 

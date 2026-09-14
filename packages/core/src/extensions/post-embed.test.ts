@@ -9,23 +9,7 @@ import {
   defaultResolveYouTubeVideo,
   matchPostEmbed,
   parsePostEmbedSnapshot,
-  parseXPostId,
 } from './post-embed.ts'
-
-describe('parseXPostId', () => {
-  it('reads the id from twitter.com, x.com, and mobile URLs', () => {
-    expect(parseXPostId('https://twitter.com/jack/status/20')).toBe('20')
-    expect(parseXPostId('https://x.com/jack/status/20')).toBe('20')
-    expect(parseXPostId('https://mobile.twitter.com/jack/status/20')).toBe('20')
-    expect(parseXPostId('https://x.com/i/status/20?s=1')).toBe('20')
-  })
-
-  it('declines profile, foreign, and malformed URLs', () => {
-    expect(parseXPostId('https://twitter.com/jack')).toBeUndefined()
-    expect(parseXPostId('https://example.com/jack/status/20')).toBeUndefined()
-    expect(parseXPostId('x.com/jack/status/20')).toBeUndefined()
-  })
-})
 
 describe('matchPostEmbed', () => {
   it('recognizes X posts', () => {
@@ -82,11 +66,16 @@ describe('default resolvers', () => {
   it('fetches an X post once through the proxy, converts it, then answers synchronously', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ data: createTweet('cached') })))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: { ...createTweet('cached'), id_str: '1001' } })),
+      )
     const first = defaultResolveXPost('https://x.com/jack/status/1001')
     expect(first).toBeInstanceOf(Promise)
-    expect(await first).toEqual(createXPost('cached'))
-    expect(defaultResolveXPost('https://x.com/jack/status/1001')).toEqual(createXPost('cached'))
+    expect(await first).toEqual({ ...createXPost('cached'), id: '1001' })
+    expect(defaultResolveXPost('https://x.com/jack/status/1001')).toEqual({
+      ...createXPost('cached'),
+      id: '1001',
+    })
     expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
       'https://react-tweet.vercel.app/api/tweet/1001',
     )

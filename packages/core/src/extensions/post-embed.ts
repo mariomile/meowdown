@@ -1,6 +1,6 @@
 import type { Resolver } from '@post-embed/elements/x'
 import { fromSyndication } from '@post-embed/exporter/x/syndication'
-import { XPostSchema, YouTubeVideoSchema } from '@post-embed/schema'
+import { XPostSchema, YouTubeVideoSchema, parseXPostId } from '@post-embed/schema'
 import type { XPost, YouTubeVideo } from '@post-embed/types'
 import { createLRU } from 'lru.min'
 import * as v from 'valibot'
@@ -9,9 +9,6 @@ export type XPostResolver = Resolver<XPost>
 export type YouTubeVideoResolver = Resolver<YouTubeVideo>
 
 export type PostEmbedKind = 'x-post' | 'youtube-video'
-
-const X_POST_HOSTS = /^(?:www\.|mobile\.)?(?:twitter\.com|x\.com)$/i
-const STATUS_ID = /\/status(?:es)?\/(\d+)/
 
 const YOUTUBE_HOSTS = /^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)$/i
 const YOUTU_BE_HOST = /^(?:www\.)?youtu\.be$/i
@@ -31,11 +28,7 @@ function parseURL(src: string): URL | undefined {
 /**
  * The post id of an X status URL, or `undefined` for any other `src`.
  */
-export function parseXPostId(src: string): string | undefined {
-  const url = parseURL(src)
-  if (!url || !X_POST_HOSTS.test(url.hostname)) return undefined
-  return STATUS_ID.exec(url.pathname)?.[1]
-}
+export { parseXPostId }
 
 function isYouTubeVideo(src: string): boolean {
   const url = parseURL(src)

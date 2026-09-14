@@ -46,11 +46,14 @@ export interface ImageOptions {
    */
   resolveImageUrl?: ImageUrlResolver
   /**
-   * Resolve the data behind an X post URL, rendered as a `post-embed-x-post`
-   * card. Defaults to `defaultResolveXPost`, which fetches through
-   * react-tweet's hosted proxy.
+   * Resolve the data behind an X post URL.
+   * When omitted, public posts use `defaultResolveXPost`.
    */
   resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
   /**
    * Resolve the data behind a YouTube video URL, rendered as a
    * `post-embed-youtube-video` card. Defaults to `defaultResolveYouTubeVideo`,
@@ -218,6 +221,7 @@ class ImageMarkView implements MarkView {
   readonly #view: EditorView
   #resolveImageUrl: ImageUrlResolver | undefined
   #resolveXPost: XPostResolver
+  #mediaUrlProtocols: string[] | undefined
   #resolveYouTubeVideo: YouTubeVideoResolver
   #attrs: MdImageAttrs
   #resizableRoot: HTMLElement | undefined
@@ -229,6 +233,7 @@ class ImageMarkView implements MarkView {
     this.#view = view
     this.#resolveImageUrl = options.resolveImageUrl
     this.#resolveXPost = options.resolveXPost ?? defaultResolveXPost
+    this.#mediaUrlProtocols = options.mediaUrlProtocols
     this.#resolveYouTubeVideo = options.resolveYouTubeVideo ?? defaultResolveYouTubeVideo
 
     this.#dom = document.createElement('span')
@@ -310,11 +315,7 @@ class ImageMarkView implements MarkView {
   }
 
   /**
-   * A post-embed card renders a saved snapshot as is. Without one (or with
-   * one that does not validate or names another kind) it loads through the
-   * resolver, rendering its own pending and unavailable states, and the first
-   * answer is written back into the source so the next open renders in the
-   * first frame with no request.
+   * Resolve X cards from their URL; YouTube cards may reuse a saved snapshot.
    */
   #buildPostEmbed(kind: PostEmbedKind, src: string): HTMLElement {
     const saved =
@@ -322,8 +323,8 @@ class ImageMarkView implements MarkView {
     if (kind === 'x-post') {
       registerXPost()
       const element = document.createElement('post-embed-x-post')
-      element.data = saved?.kind === 'x-post' ? saved.data : null
-      element.resolver = this.#persisting(kind, this.#resolveXPost)
+      element.mediaUrlProtocols = this.#mediaUrlProtocols ?? null
+      element.resolver = this.#resolveXPost
       element.url = src
       return element
     }
