@@ -116,10 +116,7 @@ export type { LinkPreview, LinkPreviewResolver } from './extensions/link-preview
 export {
   defaultResolveXPost,
   defaultResolveYouTubeVideo,
-  matchPostEmbed,
   parsePostEmbedSnapshot,
-  parseXPostId,
-  type PostEmbedKind,
   type PostEmbedSnapshot,
   type XPostResolver,
   type YouTubeVideoResolver,
