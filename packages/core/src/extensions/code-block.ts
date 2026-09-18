@@ -8,6 +8,7 @@ import { defineTextBlockInputRule } from '@prosekit/extensions/input-rule'
 
 import { parseInteger } from '../utils/parse-integer.ts'
 
+import { defineCodeBlockExitKeymap } from './code-block-exit.ts'
 import type { NodeName } from './node-names.ts'
 
 export type CodeBlockFenceStyle = 'tilde' | 'indented' | 'dollar'
@@ -103,5 +104,6 @@ export function defineCodeBlock() {
     defineTildeFenceInputRule(),
     defineTildeFenceEnterRule(),
     defineDollarFenceEnterRule(),
+    defineCodeBlockExitKeymap(),
   )
 }
