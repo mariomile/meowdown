@@ -50,6 +50,16 @@ describe('Full post snapshots', () => {
     expect(box.height).toBeCloseTo((box.width * 400) / 640, 0)
   })
 
+  it('grows a video that plays in place', async () => {
+    const snapshot = createPost()
+    snapshot.media = [createVideo()]
+    const element = mount(snapshot)
+    const item = element.querySelector('[data-media-item]')!
+    const posterHeight = item.getBoundingClientRect().height
+    await post.getByRole('button', { name: 'Play video' }).click()
+    expect(item.getBoundingClientRect().height).toBeGreaterThan(posterHeight * 1.5)
+  })
+
   it('plays a video in place after a click on its poster', async () => {
     const snapshot = createPost()
     snapshot.media = [createVideo(), createVideo(true)]
