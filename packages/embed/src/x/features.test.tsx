@@ -3,6 +3,7 @@ import './theme.css'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 
+import type { XPostMediaClickDetail } from './media-click.ts'
 import { createPhoto, createPost, createVideo } from './testing/fixtures.ts'
 
 import { registerXPost } from './index.ts'
@@ -49,21 +50,20 @@ describe('Full post snapshots', () => {
     expect(box.height).toBeCloseTo((box.width * 400) / 640, 0)
   })
 
-  it('uses MP4 before HLS, native controls, and opt-in GIF playback', async () => {
+  it('plays a video in place after a click on its poster', async () => {
     const snapshot = createPost()
     snapshot.media = [createVideo(), createVideo(true)]
     const element = mount(snapshot)
-    await expect.element(post.getByText('Hello 😀', { exact: false })).toBeVisible()
+    expect(element.querySelector('video')).toBeNull()
+    await post.getByRole('button', { name: 'Play video' }).click()
+    await post.getByRole('button', { name: 'Play GIF' }).click()
     const videos = element.querySelectorAll('video')
     expect(videos).toHaveLength(2)
     expect(videos[0].querySelector('source')?.src).toBe('https://example.com/high.mp4')
     expect(videos[0].controls).toBe(true)
-    expect(videos[0].preload).toBe('none')
-    expect(videos[0].autoplay).toBe(false)
     expect(videos[0].loop).toBe(false)
     expect(videos[1].loop).toBe(true)
     expect(videos[1].muted).toBe(true)
-    expect(videos[1].autoplay).toBe(false)
     const pause = vi.spyOn(videos[0], 'pause')
     element.remove()
     expect(pause).toHaveBeenCalled()
@@ -116,6 +116,7 @@ describe('Full post snapshots', () => {
   })
 
   it('rejects unsafe media URLs and survives missing media and invalid dates', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const snapshot = createPost()
     snapshot.createdAt = 'bad-date'
     snapshot.media = [
@@ -125,6 +126,7 @@ describe('Full post snapshots', () => {
     const element = mount(snapshot)
     expect(element.querySelector('[data-media] img, video, time')).toBeNull()
     expect(element.querySelectorAll('[data-media-unavailable]')).toHaveLength(2)
+    expect(warn).toHaveBeenCalledWith('[meowdown] Ignored unsafe media URL: javascript:alert(1)')
     snapshot.media = [createPhoto()]
     element.data = { ...snapshot }
     const image = element.querySelector<HTMLImageElement>('[data-media] img')!
@@ -153,10 +155,32 @@ describe('Full post snapshots', () => {
     ]
     const element = mount(snapshot)
     expect(element.querySelectorAll('[data-media-item]')).toHaveLength(2)
+    await post.getByRole('button', { name: 'Play video' }).click()
     element.querySelector('source')!.dispatchEvent(new Event('error'))
     await expect
       .element(post.getByText('Media could not be loaded.', { exact: false }).nth(1))
       .toBeVisible()
     expect(element.querySelector('video')?.hidden).toBe(true)
+  })
+
+  it('lets a host take over a media click', async () => {
+    const snapshot = createPost()
+    snapshot.media = [createPhoto(), createVideo()]
+    const element = mount(snapshot)
+    const details: XPostMediaClickDetail[] = []
+    element.addEventListener('meowdown-embed-media-click', (event) => {
+      event.preventDefault()
+      details.push(event.detail)
+    })
+    await post.getByRole('img', { name: 'Blue illustrated mountains' }).click()
+    await post.getByRole('button', { name: 'Play video' }).click()
+    expect(element.querySelector('video')).toBeNull()
+    expect(details.map((detail) => detail.index)).toEqual([0, 1])
+    expect(details[0].element).toBe(element.querySelector('[data-media] img'))
+    expect(details[1].items).toHaveLength(2)
+    expect(details[1].media).toMatchObject({
+      type: 'video',
+      sources: [{ url: 'https://example.com/high.mp4' }, {}, {}],
+    })
   })
 })

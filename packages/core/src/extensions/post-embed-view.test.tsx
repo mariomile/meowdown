@@ -1,3 +1,4 @@
+import type { XPostMediaClickEvent } from '@meowdown/embed/x'
 import type { XPost } from '@post-embed/types'
 import { describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
@@ -61,6 +62,74 @@ describe('post embed clicks', () => {
     await expect.element(play).toBeInTheDocument()
     await userEvent.click(play)
     expect(onImageClick).not.toHaveBeenCalled()
+  })
+})
+
+describe('X post media clicks', () => {
+  // A photo that loads without the network: the card hides one that fails.
+  const PHOTO_URL =
+    "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='100'%20height='100'/%3E"
+
+  function createMediaPost(): XPost {
+    const post = createXPost()
+    post.media = [
+      { type: 'photo', url: PHOTO_URL, width: 100, height: 100 },
+      {
+        type: 'video',
+        width: 100,
+        height: 100,
+        sources: [{ type: 'video/mp4', url: 'https://example.com/video.mp4' }],
+      },
+    ]
+    return post
+  }
+
+  it('reports a clicked photo and video instead of running the card default', async () => {
+    const onXPostMediaClick = vi.fn((event: XPostMediaClickEvent) => event.preventDefault())
+    using fixture = setupFixture({
+      extensionOptions: {
+        resolveXPost: createMediaPost,
+        mediaUrlProtocols: ['data:'],
+        onXPostMediaClick,
+      },
+    })
+    fixture.set(fixture.n.doc(fixture.n.paragraph(TWEET)))
+    const image = xPostCard.locate('[data-media] img')
+    await expect.element(image).toBeInTheDocument()
+    await userEvent.click(image)
+    await userEvent.click(xPostCard.getByRole('button', { name: 'Play video' }))
+    expect(onXPostMediaClick).toHaveBeenCalledTimes(2)
+    expect(onXPostMediaClick.mock.calls[0][0].detail).toMatchObject({
+      index: 0,
+      media: { type: 'photo', url: PHOTO_URL },
+      element: image.element(),
+    })
+    expect(onXPostMediaClick.mock.calls[1][0].detail).toMatchObject({ index: 1 })
+    expect(xPostCard.element().querySelector('video')).toBeNull()
+  })
+
+  it('keeps the card default when the handler does not prevent it', async () => {
+    const onXPostMediaClick = vi.fn()
+    using fixture = setupFixture({
+      extensionOptions: {
+        resolveXPost: createMediaPost,
+        mediaUrlProtocols: ['data:'],
+        onXPostMediaClick,
+      },
+    })
+    fixture.set(fixture.n.doc(fixture.n.paragraph(TWEET)))
+    await userEvent.click(xPostCard.getByRole('button', { name: 'Play video' }))
+    expect(onXPostMediaClick).toHaveBeenCalledTimes(1)
+    await expect.element(xPostCard.locate('video')).toBeInTheDocument()
+  })
+
+  it('keeps the card default without a handler', async () => {
+    using fixture = setupFixture({
+      extensionOptions: { resolveXPost: createMediaPost, mediaUrlProtocols: ['data:'] },
+    })
+    fixture.set(fixture.n.doc(fixture.n.paragraph(TWEET)))
+    await userEvent.click(xPostCard.getByRole('button', { name: 'Play video' }))
+    await expect.element(xPostCard.locate('video')).toBeInTheDocument()
   })
 })
 

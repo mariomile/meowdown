@@ -1,6 +1,7 @@
 import '../testing/index.ts'
 
 import type { FileClickHandler } from '@meowdown/core'
+import type { XPostMediaClickEvent } from '@meowdown/embed/x'
 import type { XPost } from '@post-embed/types'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
@@ -12,6 +13,10 @@ import { createXPost } from '../testing/x-post-fixture.ts'
 import { createYouTubeVideo } from '../testing/youtube-fixture.ts'
 
 import { MarkdownView } from './markdown-view.tsx'
+
+// A photo that loads without the network: the card hides one that fails.
+const PHOTO_URL =
+  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='100'%20height='100'/%3E"
 import { ProseKitEditor } from './prosekit-editor.tsx'
 
 const view = page.getByTestId('markdown-view')
@@ -265,6 +270,25 @@ describe('MarkdownView', () => {
     await expect
       .element(view.getByTestId('x-post-embed').locate('[data-media] img'))
       .toHaveAttribute('src', 'reflect-asset://saved/photo.png')
+  })
+
+  it('reports a clicked X post photo', async () => {
+    const post = createXPost()
+    post.media = [{ type: 'photo', url: PHOTO_URL, width: 100, height: 100 }]
+    const onXPostMediaClick = vi.fn((event: XPostMediaClickEvent) => event.preventDefault())
+    await renderView('![](https://x.com/jack/status/20)', {
+      resolveXPost: () => post,
+      mediaUrlProtocols: ['data:'],
+      onXPostMediaClick,
+    })
+    const image = view.getByTestId('x-post-embed').locate('[data-media] img')
+    await expect.element(image).toBeInTheDocument()
+    await image.click()
+    expect(onXPostMediaClick).toHaveBeenCalledTimes(1)
+    expect(onXPostMediaClick.mock.calls[0][0].detail).toMatchObject({
+      index: 0,
+      media: { type: 'photo', url: PHOTO_URL },
+    })
   })
 
   it('renders an X post card from a synchronous snapshot', async () => {

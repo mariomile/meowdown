@@ -1,5 +1,7 @@
 import { isObject } from '@ocavue/utils'
 
+import { toPositiveNumber } from '../utils/to-positive-number.ts'
+
 /**
  * Metadata meowdown stores in a sidecar `<!-- {...} -->` comment.
  */
@@ -60,12 +62,6 @@ export function parseMagicComment(comment: string): MagicComment | undefined {
   if (!width && !height && !noLink && !snapshot) return
 
   return { width, height, noLink, snapshot }
-}
-
-function toPositiveNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return Math.round(value)
-  }
 }
 
 /**
