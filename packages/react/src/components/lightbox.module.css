@@ -1,0 +1,34 @@
+.Dialog {
+  all: revert;
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100dvw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  overflow: hidden;
+  padding: var(--meowdown-lightbox-padding, 1.5rem);
+  border: 0;
+  outline: none;
+  background: var(--meowdown-lightbox-backdrop, rgb(0 0 0 / 0.8));
+
+  &::backdrop {
+    background: transparent;
+  }
+}
+
+.Image {
+  max-width: 100%;
+  max-height: 100%;
+  user-select: none;
+}
+
+.Video {
+  position: relative;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+}
