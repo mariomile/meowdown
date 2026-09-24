@@ -4,11 +4,12 @@ import { getId } from '@ocavue/utils'
 import { clsx } from 'clsx/lite'
 import { useCallback, useRef, useState } from 'react'
 
+import { DemoLightbox } from '../components/demo-lightbox.tsx'
 import { SegmentedControl } from '../components/segmented-control.tsx'
+import { useDemoLightbox } from '../components/use-demo-lightbox.ts'
 import { WikilinkPreviewCard } from '../components/wikilink-preview-card.tsx'
 import {
   handleFileClick,
-  handleImageClick,
   handleLinkClick,
   handleTagClick,
   handleWikilinkClick,
@@ -40,6 +41,9 @@ export function HomeDemo() {
   // a top or bottom border inside the editor box. A bumped id remounts the
   // overlay so its one-shot fade restarts on every press.
   const [edgeFlash, setEdgeFlash] = useState<{ id: number; direction: 'up' | 'down' }>()
+  const { lightbox, handleImageClick, handleXPostMediaClick, handleYouTubeVideoClick } =
+    useDemoLightbox()
+
   const handleExitBoundary: ExitBoundaryHandler = useCallback(({ direction }) => {
     setEdgeFlash({ id: getId(), direction })
   }, [])
@@ -87,6 +91,8 @@ export function HomeDemo() {
               resolveFileInfo={resolveFileInfo}
               onFileClick={handleFileClick}
               onImageClick={handleImageClick}
+              onXPostMediaClick={handleXPostMediaClick}
+              onYouTubeVideoClick={handleYouTubeVideoClick}
               onLinkClick={handleLinkClick}
               resolveLinkPreview={resolveLinkPreview}
               onTagClick={handleTagClick}
@@ -101,6 +107,7 @@ export function HomeDemo() {
         </div>
 
         {findDemo.bar}
+        <DemoLightbox lightbox={lightbox} />
 
         {edgeFlash && (
           <div

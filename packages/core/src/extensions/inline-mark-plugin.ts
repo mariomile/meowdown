@@ -1,3 +1,4 @@
+import { definePlugin, type PlainExtension } from '@prosekit/core'
 /**
  * Inline-mark plugin
  *
@@ -12,8 +13,6 @@
  *     -> if chunks is non-empty: tr.step(new BatchSetMarkStep(chunks))
  *                                  .setMeta(META_KEY, true)
  */
-
-import { definePlugin, type PlainExtension } from '@prosekit/core'
 import type { EditorNode, Schema } from '@prosekit/pm/model'
 import type { EditorState, Transaction } from '@prosekit/pm/state'
 import { Plugin, PluginKey } from '@prosekit/pm/state'
@@ -113,7 +112,9 @@ function computeAffectedRange(
   }
 }
 
-function createInlineMarkPlugin(options: InlineMarkOptions | undefined): Plugin {
+function createInlineMarkPlugin(
+  getOptions?: (state: EditorState) => InlineMarkOptions | undefined,
+): Plugin {
   /**
    * Cache of chunks per textblock node, keyed by the immutable
    * `ProseMirrorNode` instance. Stored chunks are baseOffset-relative
@@ -149,6 +150,7 @@ function createInlineMarkPlugin(options: InlineMarkOptions | undefined): Plugin 
     node: EditorNode,
     baseOffset: number,
     schema: Schema,
+    options: InlineMarkOptions | undefined,
     references: ReferenceDefinitionIndex,
     changedKeys: ReadonlySet<string>,
     isReferenceDefinition: boolean,
@@ -192,6 +194,7 @@ function createInlineMarkPlugin(options: InlineMarkOptions | undefined): Plugin 
   function collectChunks(
     state: EditorState,
     range: PositionRange,
+    options: InlineMarkOptions | undefined,
     references: ReferenceDefinitionIndex,
     changedKeys: ReadonlySet<string>,
   ): {
@@ -219,6 +222,7 @@ function createInlineMarkPlugin(options: InlineMarkOptions | undefined): Plugin 
         node,
         pos + 1,
         state.schema,
+        options,
         references,
         changedKeys,
         isReferenceDefinitionNode(node, parent, index),
@@ -297,11 +301,13 @@ function createInlineMarkPlugin(options: InlineMarkOptions | undefined): Plugin 
       const changedKeys = restyle
         ? (pluginKey.getState(oldState)?.pendingReferenceKeys ?? emptyReferenceKeys)
         : emptyReferenceKeys
+      const options: InlineMarkOptions | undefined = getOptions?.(newState)
       const range = restyle ? { from: 0, to: 0 } : computeAffectedRange(transactions, newState)
-      const { chunks, processed } = collectChunks(newState, range, references, changedKeys)
+      const { chunks, processed } = collectChunks(newState, range, options, references, changedKeys)
       if (chunks.length === 0) return null
       const tr = newState.tr.step(new BatchSetMarkStep(chunks))
       transferCache(tr.doc, processed)
+      if (tr.doc.eq(newState.doc)) return null
       tr.setMeta(META_KEY, true)
       tr.setMeta('addToHistory', false)
       return tr
@@ -379,6 +385,8 @@ function mergeReferenceKeys(
   return merged
 }
 
-export function defineInlineMarkPlugin(options?: InlineMarkOptions): PlainExtension {
-  return definePlugin(createInlineMarkPlugin(options))
+export function defineInlineMarkPlugin(
+  getOptions?: (state: EditorState) => InlineMarkOptions | undefined,
+): PlainExtension {
+  return definePlugin(createInlineMarkPlugin(getOptions))
 }

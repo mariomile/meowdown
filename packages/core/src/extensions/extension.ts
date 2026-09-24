@@ -9,41 +9,64 @@ import { defineBlockquote } from '@prosekit/extensions/blockquote'
 import { defineDoc } from '@prosekit/extensions/doc'
 import { defineGapCursor } from '@prosekit/extensions/gap-cursor'
 import { defineModClickPrevention } from '@prosekit/extensions/mod-click-prevention'
+import { definePlaceholder } from '@prosekit/extensions/placeholder'
 import { defineText } from '@prosekit/extensions/text'
 import { defineVirtualSelection } from '@prosekit/extensions/virtual-selection'
 
 import { defineAtomMarkNavigation } from './atom-mark-navigation.ts'
+import { defineBulletAfterHeading } from './bullet-after-heading.ts'
+import { defineClickBelow } from './click-below.ts'
 import { defineClipboard } from './clipboard/clipboard.ts'
 import { defineCodeBlockSyntaxHighlight } from './code-block-highlight.ts'
 import { defineCodeBlock } from './code-block.ts'
 import { defineEditorCommands } from './commands.ts'
 import { defineCrossEditorDrag } from './cross-editor-drag.ts'
+import { getEditorConfig } from './editor-config-getter.ts'
+import type { EditorConfig } from './editor-config-types.ts'
+import { defineEditorConfig } from './editor-config.ts'
+import { defineEmbedPaste } from './embed-paste.ts'
 import { defineEscapeCollapse } from './escape-collapse.ts'
+import { defineExitBoundaryHandler } from './exit-boundary.ts'
+import { defineFileClickHandler } from './file-click.ts'
+import { defineFilePaste } from './file-paste.ts'
+import { defineFileView } from './file-view.ts'
 import { defineFind } from './find.ts'
+import { defineFollowLinkHandler } from './follow-link.ts'
 import { defineDocFrontmatterAttr } from './frontmatter.ts'
 import { defineHeading } from './heading.ts'
 import { defineHiddenRunCaret } from './hidden-run-caret.ts'
 import { defineMeowdownHorizontalRule } from './horizontal-rule.ts'
 import { defineHTMLComment } from './html-comment.ts'
+import { defineImageClickHandler } from './image-click.ts'
+import { defineImage } from './image.ts'
 import { defineInlineMarkPlugin } from './inline-mark-plugin.ts'
 import { defineInlineMarks } from './inline-marks.ts'
-import type { InlineMarkOptions } from './inline-text-to-mark-chunks.ts'
 import { defineInlineToggle } from './inline-toggle-commands.ts'
+import { defineLinkClickHandler } from './link-click.ts'
 import { defineLinkCommands } from './link-commands.ts'
+import { defineLinkPaste } from './link-paste.ts'
 import { defineMeowdownList } from './list.ts'
-import { defineMarkMode, type MarkMode } from './mark-mode.ts'
+import { getMarkMode } from './mark-mode-config.ts'
+import { defineMarkMode } from './mark-mode.ts'
 import { ATOM_SOURCE_MARK_NAMES } from './mark-names.ts'
 import { defineMath } from './math.ts'
 import { defineMoveBlock } from './move-block.ts'
 import { defineMeowdownParagraph } from './paragraph.ts'
 import { definePendingReplacement } from './pending-replacement.ts'
+import { defineReadonly } from './readonly.ts'
 import { defineScrollToSelection } from './scroll-to-selection.ts'
 import { defineSelectDocBoundary } from './select-doc-boundary.ts'
 import { defineSoftBreak } from './soft-break.ts'
+import { defineSubstitution } from './substitution.ts'
 import { defineSystemSubstitutionGuard } from './system-substitution-guard.ts'
 import { defineTable } from './table.ts'
+import { defineTagClickHandler } from './tag-click.ts'
 import { defineViewAttributes } from './view-attributes.ts'
+import { defineWikilinkClickHandler } from './wikilink-click.ts'
+import { defineWikilinkTrigger } from './wikilink-trigger.ts'
 import { defineWikilink } from './wikilink.ts'
+import { defineXPostMediaClickHandler } from './x-post-media-click.ts'
+import { defineYouTubeVideoClickHandler } from './youtube-video-click.ts'
 
 function defineEditorExtensionImpl(options: EditorExtensionOptions) {
   return union(
@@ -64,19 +87,53 @@ function defineEditorExtensionImpl(options: EditorExtensionOptions) {
     defineInlineMarks(),
 
     // plugins
-    defineViewAttributes({ class: 'meowdown-content' }),
+    defineEditorConfig(options),
+    defineImage(getEditorConfig),
+    defineFileView(getEditorConfig),
+    defineModClickPrevention(),
+    defineFileClickHandler((state) => getEditorConfig(state).onFileClick),
+    defineImageClickHandler((state) => getEditorConfig(state).onImageClick),
+    defineXPostMediaClickHandler((state) => getEditorConfig(state).onXPostMediaClick),
+    defineYouTubeVideoClickHandler((state) => getEditorConfig(state).onYouTubeVideoClick),
+    defineWikilinkClickHandler((state) => getEditorConfig(state).onWikilinkClick),
+    defineTagClickHandler((state) => getEditorConfig(state).onTagClick),
+    defineLinkClickHandler((state) => getEditorConfig(state).onLinkClick),
+    defineFollowLinkHandler(getEditorConfig),
+    defineExitBoundaryHandler((state) => getEditorConfig(state).onExitBoundary),
+    defineFilePaste(getEditorConfig),
+    defineEmbedPaste((state) => !!getEditorConfig(state).embedPaste),
+    defineLinkPaste((state) => !!getEditorConfig(state).linkPaste),
+    defineBulletAfterHeading((state) => !!getEditorConfig(state).bulletAfterHeading),
+    defineSubstitution((state) => !!getEditorConfig(state).substitution),
+    defineWikilinkTrigger((state) => !!getEditorConfig(state).wikilinkEnabled),
+    definePlaceholder({
+      placeholder: (state) => {
+        const placeholder = getEditorConfig(state).placeholder
+        return typeof placeholder === 'function' ? placeholder(state) : (placeholder ?? '')
+      },
+      strategy: 'doc',
+    }),
+    defineReadonly((state) => !!getEditorConfig(state).readOnly),
+    defineViewAttributes((state) => {
+      const { editorClassName, spellCheck } = getEditorConfig(state)
+      const attributes: Record<string, string> = { class: 'meowdown-content' }
+      if (editorClassName) attributes.class += ` ${editorClassName}`
+      if (spellCheck != null) attributes.spellcheck = String(spellCheck)
+      return attributes
+    }),
     defineCodeBlockSyntaxHighlight(),
     defineCrossEditorDrag(),
+    defineClickBelow(),
     defineEscapeCollapse(),
     defineSoftBreak(),
     defineMoveBlock(),
     defineSelectDocBoundary(),
-    defineInlineMarkPlugin(options),
+    defineInlineMarkPlugin(getEditorConfig),
     defineInlineToggle(),
     defineLinkCommands(),
     defineWikilink(),
     defineMath(),
-    defineMarkMode(options.markMode ?? 'focus'),
+    defineMarkMode(getMarkMode),
     defineClipboard(),
     defineScrollToSelection(),
     defineHiddenRunCaret(),
@@ -91,7 +148,6 @@ function defineEditorExtensionImpl(options: EditorExtensionOptions) {
     defineHistory(),
     defineGapCursor(),
     defineVirtualSelection(),
-    defineModClickPrevention(),
     defineEditorCommands(),
     definePendingReplacement(),
     defineFind(),
@@ -101,18 +157,9 @@ function defineEditorExtensionImpl(options: EditorExtensionOptions) {
 export type EditorExtension = ReturnType<typeof defineEditorExtensionImpl>
 
 /**
- * Options for {@link defineEditorExtension}. Creation-time configuration:
- * `resolveFileLink`, `resolveWikiEmbed`, and `resolveWikilink` are baked into
- * the editor's parse pipeline, so changing them requires rebuilding the
- * editor; `markMode` is only the initial value.
+ * Initial configuration, updatable with `updateEditorConfig`.
  */
-export type EditorExtensionOptions = InlineMarkOptions & {
-  /**
-   * The initial mark mode, applied from the first paint. Defaults to
-   * `'focus'`. Switch later with the `setMarkMode` command.
-   */
-  markMode?: MarkMode
-}
+export type EditorExtensionOptions = EditorConfig
 
 export function defineEditorExtension(options: EditorExtensionOptions = {}): EditorExtension {
   return defineEditorExtensionImpl(options)

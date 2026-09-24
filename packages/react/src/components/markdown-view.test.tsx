@@ -1,13 +1,23 @@
 import '../testing/index.ts'
 
-import type { FileClickHandler } from '@meowdown/core'
+import type { FileClickHandler, ImageClickHandler } from '@meowdown/core'
+import type { XPostMediaClickEvent } from '@meowdown/embed/x'
+import type { YouTubeVideoClickEvent } from '@meowdown/embed/youtube'
+import type { XPost } from '@post-embed/types'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
 
 import { resolveWikilinkAlias } from '../testing/resolve-wikilink-alias.ts'
+import { createTweet } from '../testing/tweet-fixture.ts'
+import { createXPost } from '../testing/x-post-fixture.ts'
+import { createYouTubeVideo } from '../testing/youtube-fixture.ts'
 
 import { MarkdownView } from './markdown-view.tsx'
+
+// A photo that loads without the network: the card hides one that fails.
+const PHOTO_URL =
+  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='100'%20height='100'/%3E"
 import { ProseKitEditor } from './prosekit-editor.tsx'
 
 const view = page.getByTestId('markdown-view')
@@ -229,25 +239,154 @@ describe('MarkdownView', () => {
     )
   })
 
-  it('renders a tweet embed', async () => {
-    await renderView('![](https://x.com/jack/status/20)')
-    const iframe = view.getByTestId('tweet-embed')
-    await expect.element(iframe).toBeInTheDocument()
-    await expect
-      .element(iframe)
-      .toHaveAttribute(
-        'src',
-        expect.stringContaining('platform.twitter.com/embed/Tweet.html?id=20'),
+  it('renders an X post card through the default resolver', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: { ...createTweet('fetched by default'), id_str: '3001' } }),
+        ),
       )
+    try {
+      await renderView('![](https://x.com/jack/status/3001)')
+      const card = view.getByTestId('x-post-embed').locate('[data-meowdown-embed="x"]')
+      await expect.element(card).toMatchTextContent('fetched by default')
+      expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+        'https://react-tweet.vercel.app/api/tweet/3001',
+      )
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 
-  it('renders a youtube embed', async () => {
-    await renderView('![](https://youtu.be/dQw4w9WgXcQ)')
-    const iframe = view.getByTestId('youtube-embed')
-    await expect.element(iframe).toBeInTheDocument()
+  it('accepts separate resolver and media protocol props', async () => {
+    const post = createXPost()
+    post.media = [
+      { type: 'photo', url: 'reflect-asset://saved/photo.png', width: 100, height: 100 },
+    ]
+    await renderView('![](https://x.com/jack/status/20)', {
+      resolveXPost: () => post,
+      mediaUrlProtocols: ['reflect-asset:'],
+    })
     await expect
-      .element(iframe)
-      .toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+      .element(view.getByTestId('x-post-embed').locate('[data-media] img'))
+      .toHaveAttribute('src', 'reflect-asset://saved/photo.png')
+  })
+
+  it('reports a clicked image with its element', async () => {
+    const onImageClick = vi.fn<ImageClickHandler>()
+    await renderView('![cat](cat.png)', {
+      resolveImageUrl: () => PHOTO_URL,
+      onImageClick,
+    })
+    const image = view.getByTestId('image-preview').locate('img')
+    await expect.element(image).toBeInTheDocument()
+    await image.click()
+    expect(onImageClick).toHaveBeenCalledTimes(1)
+    const payload = onImageClick.mock.calls[0][0]
+    expect(payload).toMatchObject({ src: 'cat.png', alt: 'cat' })
+    expect(payload.element).toBe(image.element())
+  })
+
+  it('reports a clicked X post photo', async () => {
+    const post = createXPost()
+    post.media = [{ type: 'photo', url: PHOTO_URL, width: 100, height: 100 }]
+    const onXPostMediaClick = vi.fn((event: XPostMediaClickEvent) => event.preventDefault())
+    await renderView('![](https://x.com/jack/status/20)', {
+      resolveXPost: () => post,
+      mediaUrlProtocols: ['data:'],
+      onXPostMediaClick,
+    })
+    const image = view.getByTestId('x-post-embed').locate('[data-media] img')
+    await expect.element(image).toBeInTheDocument()
+    await image.click()
+    expect(onXPostMediaClick).toHaveBeenCalledTimes(1)
+    expect(onXPostMediaClick.mock.calls[0][0].detail).toMatchObject({
+      index: 0,
+      media: { type: 'photo', url: PHOTO_URL },
+    })
+  })
+
+  it('renders an X post card from a synchronous snapshot', async () => {
+    await renderView('![](https://x.com/jack/status/20)', {
+      resolveXPost: () => createXPost(),
+    })
+    const card = view.getByTestId('x-post-embed').locate('[data-meowdown-embed="x"]')
+    await expect.element(card).toMatchTextContent('just setting up my twttr')
+  })
+
+  it('shows the loading card until a promised snapshot settles', async () => {
+    let settle!: (post: XPost) => void
+    const pending = new Promise<XPost>((resolve) => {
+      settle = resolve
+    })
+    await renderView('![](https://x.com/jack/status/20)', { resolveXPost: () => pending })
+    const card = view.getByTestId('x-post-embed').locate('[data-meowdown-embed="x"]')
+    await expect.element(card.locate('[data-fallback][data-pending]')).toBeInTheDocument()
+
+    settle(createXPost())
+    await expect.element(card).toMatchTextContent('just setting up my twttr')
+    expect(card.locate('[data-pending]').query()).toBeNull()
+  })
+
+  it('renders host data even when source contains an old snapshot', async () => {
+    const resolveXPost = vi.fn(() => createXPost())
+    const comment = `<!-- ${JSON.stringify({ snapshot: { kind: 'x-post', data: createXPost('saved') } })} -->`
+    await renderView(`![](https://x.com/jack/status/20)${comment}`, {
+      resolveXPost,
+    })
+    const card = view.getByTestId('x-post-embed').locate('[data-meowdown-embed="x"]')
+    await expect.element(card).toMatchTextContent('just setting up my twttr')
+    expect(resolveXPost).toHaveBeenCalledOnce()
+    expect(card.locate('[data-fallback]').query()).toBeNull()
+  })
+
+  it('resolves when the saved snapshot does not validate', async () => {
+    await renderView(
+      '![](https://x.com/jack/status/20)<!-- {"snapshot":{"kind":"x-post","data":{"bogus":1}}} -->',
+      { resolveXPost: () => createXPost() },
+    )
+    const card = view.getByTestId('x-post-embed').locate('[data-meowdown-embed="x"]')
+    await expect.element(card).toMatchTextContent('just setting up my twttr')
+  })
+
+  it('renders the unavailable card without a snapshot', async () => {
+    await renderView('![](https://x.com/jack/status/20)', {
+      resolveXPost: () => undefined,
+    })
+    await expect
+      .element(view.getByTestId('x-post-embed').locate('[data-fallback]'))
+      .toBeInTheDocument()
+  })
+
+  it('renders a YouTube video card', async () => {
+    await renderView('![](https://youtu.be/aqz-KE-bpKQ)', {
+      resolveYouTubeVideo: () => createYouTubeVideo(),
+    })
+    const card = view.getByTestId('youtube-video-embed').locate('[data-meowdown-embed="youtube"]')
+    await expect.element(card).toMatchTextContent('Big Buck Bunny')
+    expect(view.locate('iframe').query()).toBeNull()
+  })
+
+  it('reports a clicked YouTube poster instead of playing in the card', async () => {
+    const onYouTubeVideoClick = vi.fn((event: YouTubeVideoClickEvent) => event.preventDefault())
+    await renderView('![](https://youtu.be/aqz-KE-bpKQ)<!-- {"width":320} -->', {
+      resolveYouTubeVideo: () => createYouTubeVideo(),
+      onYouTubeVideoClick,
+    })
+    await view.getByRole('button', { name: 'Play: Big Buck Bunny' }).click()
+    expect(onYouTubeVideoClick).toHaveBeenCalledTimes(1)
+    expect(onYouTubeVideoClick.mock.calls[0][0].detail).toMatchObject({ videoId: 'aqz-KE-bpKQ' })
+    expect(view.locate('iframe').query()).toBeNull()
+  })
+
+  it('applies a persisted width to a YouTube video card', async () => {
+    await renderView('![](https://youtu.be/aqz-KE-bpKQ)<!-- {"width":320} -->', {
+      resolveYouTubeVideo: () => createYouTubeVideo(),
+    })
+    const card = view.getByTestId('youtube-video-embed').locate('[data-meowdown-embed="youtube"]')
+    await expect.element(card).toMatchTextContent('Big Buck Bunny')
+    expect(getComputedStyle(card.element()).width).toBe('320px')
   })
 
   it('omits recognized embeds before resolving images when interactive is false', async () => {
@@ -430,6 +569,61 @@ describe('MarkdownView', () => {
       </div>,
     )
     await expect.element(view).toHaveTextContent('second')
+  })
+})
+
+describe('MarkdownView block memoization', () => {
+  it('parses only the block that changed when the markdown grows', async () => {
+    const resolveWikilink = vi.fn(resolveWikilinkAlias)
+    const screen = await renderView('[[target|Alias]]\n\nfirst', { resolveWikilink })
+    await expect.element(wikilink).toHaveTextContent('Alias')
+    const parses = resolveWikilink.mock.calls.length
+    await screen.rerender(
+      <div data-testid="markdown-view">
+        <MarkdownView
+          markdown={'[[target|Alias]]\n\nfirst\n\nsecond'}
+          resolveWikilink={resolveWikilink}
+        />
+      </div>,
+    )
+    await expect.element(view.locate('p').last()).toHaveTextContent('second')
+    expect(resolveWikilink).toHaveBeenCalledTimes(parses)
+  })
+
+  it('keeps task indexes document-wide when a task list appears before an unchanged one', async () => {
+    const onTaskClick = vi.fn()
+    const screen = await renderView('intro\n\n- [ ] later', { onTaskClick })
+    await expect.element(view.locate('input[type="checkbox"]')).toBeInTheDocument()
+    await screen.rerender(
+      <div data-testid="markdown-view">
+        <MarkdownView markdown={'- [ ] earlier\n\n- [ ] later'} onTaskClick={onTaskClick} />
+      </div>,
+    )
+    await view.locate('input[type="checkbox"]').nth(1).click()
+    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ index: 1, text: 'later' }))
+  })
+
+  it('resolves a reference in an unchanged block when its definition arrives later', async () => {
+    const screen = await renderView('See [docs].\n\nfiller')
+    await expect.element(view.locate('p').first()).toHaveTextContent('See [docs].')
+    expect(view.element().querySelector('a')).toBeNull()
+    await screen.rerender(
+      <div data-testid="markdown-view">
+        <MarkdownView markdown={'See [docs].\n\nfiller\n\n[docs]: https://example.com'} />
+      </div>,
+    )
+    await expect.element(view.locate('a')).toHaveAttribute('href', 'https://example.com')
+  })
+
+  it('re-renders a block the appended source merges into', async () => {
+    const screen = await renderView('title')
+    await expect.element(view.locate('p')).toHaveTextContent('title')
+    await screen.rerender(
+      <div data-testid="markdown-view">
+        <MarkdownView markdown={'title\n==='} />
+      </div>,
+    )
+    await expect.element(view.locate('h1')).toHaveTextContent('title')
   })
 })
 

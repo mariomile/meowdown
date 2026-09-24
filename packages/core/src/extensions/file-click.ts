@@ -53,12 +53,16 @@ export type FileClickHandler = (payload: FileClickPayload) => void
  * `href`, `name`, and the originating `MouseEvent`. The host decides what a
  * click does (e.g. open the file in the OS default app).
  */
-export function defineFileClickHandler(onClick: FileClickHandler): PlainExtension {
+export function defineFileClickHandler(
+  getOnClick?: (state: EditorState) => FileClickHandler | undefined,
+): PlainExtension {
   return definePlugin(
     new Plugin({
       key: fileClickKey,
       props: {
         handleClick: (view, _pos, event) => {
+          const handler = getOnClick?.(view.state)
+          if (!handler) return false
           const target = event.target as HTMLElement | null
           const preview = target?.closest?.('.md-file-view-preview')
           if (!preview) return false
@@ -69,7 +73,7 @@ export function defineFileClickHandler(onClick: FileClickHandler): PlainExtensio
           if (!content) return false
           const hit = findFileAt(view.state, view.posAtDOM(content, 0))
           if (!hit) return false
-          onClick({ href: hit.href, name: hit.name, event, mod: isModEvent(event) })
+          handler({ href: hit.href, name: hit.name, event, mod: isModEvent(event) })
           return true
         },
       },

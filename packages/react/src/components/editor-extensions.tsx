@@ -1,116 +1,37 @@
 import {
-  defineBulletAfterHeading,
-  defineEmbedPaste,
-  defineExitBoundaryHandler,
-  defineFileClickHandler,
-  defineFilePaste,
-  defineFileView,
-  defineFollowLinkHandler,
-  defineImage,
-  defineImageClickHandler,
-  defineLinkClickHandler,
-  defineLinkPaste,
-  definePlaceholder,
-  defineReadonly,
   defineSearchStatusHandler,
-  defineSubstitution,
-  defineTagClickHandler,
-  defineViewAttributes,
-  defineWikilinkClickHandler,
-  defineWikilinkTrigger,
+  updateEditorConfig,
+  type EditorConfig,
   type EditorExtension,
-  type ExitBoundaryHandler,
-  type FileClickHandler,
-  type FilePasteOptions,
-  type FileViewOptions,
-  type ImageClickHandler,
-  type ImageOptions,
-  type LinkClickHandler,
-  type MarkMode,
-  type PlaceholderOptions,
   type SearchStatusHandler,
-  type TagClickHandler,
-  type WikilinkClickHandler,
 } from '@meowdown/core'
 import { defineDocChangeHandler } from '@prosekit/core'
 import { useEditor, useExtension } from '@prosekit/react'
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo } from 'react'
+import { useDeferredValue, useEffect, useMemo } from 'react'
 
-export interface EditorExtensionsProps {
-  markMode: MarkMode
-  onDocChange?: VoidFunction
-  onWikilinkClick?: WikilinkClickHandler
-  onLinkClick?: LinkClickHandler
-  onTagClick?: TagClickHandler
-  onExitBoundary?: ExitBoundaryHandler
-  resolveImageUrl?: ImageOptions['resolveImageUrl']
-  resolveFileInfo?: FileViewOptions['resolveFileInfo']
-  onFileClick?: FileClickHandler
-  onFilePaste?: FilePasteOptions['onFilePaste']
-  onFileSaveError?: FilePasteOptions['onFileSaveError']
-  onImageClick?: ImageClickHandler
-  embedPaste?: boolean
-  linkPaste?: boolean
-  bulletAfterHeading?: boolean
-  substitution?: boolean
-  placeholder?: PlaceholderOptions['placeholder']
-  readOnly?: boolean
-  wikilinkEnabled?: boolean
-  spellCheck?: boolean
+interface EditorExtensionsProps {
+  config: EditorConfig
   searchQuery: string
+  onDocChange?: VoidFunction
   onSearchChange?: SearchStatusHandler
-  editorClassName?: string
 }
 
-// A leaf that renders nothing and holds every reactive `useExtension` call (each
-// runs effect hooks), so the parent editor re-renders less. `useExtension` reads
-// the editor from context.
+// A leaf that renders nothing and holds reactive configuration effects,
+// so the parent editor keeps its lifecycle work in one place.
 export function EditorExtensions({
-  markMode,
-  onDocChange,
-  onWikilinkClick,
-  onLinkClick,
-  onTagClick,
-  onExitBoundary,
-  resolveImageUrl,
-  resolveFileInfo,
-  onFileClick,
-  onFilePaste,
-  onFileSaveError,
-  onImageClick,
-  embedPaste,
-  linkPaste,
-  bulletAfterHeading,
-  substitution,
-  placeholder,
-  readOnly,
-  wikilinkEnabled,
-  spellCheck,
+  config,
   searchQuery,
+  onDocChange,
   onSearchChange,
-  editorClassName,
 }: EditorExtensionsProps): null {
-  // The mark-mode plugin ships in the creation extension so the first paint
-  // already hides the syntax; here only later `markMode` changes are applied.
-  // The command no-ops when the state already has that mode.
   const editor = useEditor<EditorExtension>()
-  useLayoutEffect(() => {
-    editor.commands.setMarkMode(markMode)
-  }, [editor, markMode])
 
-  // Set extra editor class name.
-  useLayoutEffect(() => {
-    if (!editorClassName) return
-    const extension = defineViewAttributes({ class: editorClassName })
-    return editor.use(extension)
-  }, [editor, editorClassName])
-
-  // Set spellCheck
-  useLayoutEffect(() => {
-    if (spellCheck == null) return
-    const extension = defineViewAttributes({ spellcheck: spellCheck ? 'true' : 'false' })
-    return editor.use(extension)
-  }, [editor, spellCheck])
+  // Initial configuration already belongs to the creation extension. Later
+  // updates run outside React's lifecycle because adapter views use flushSync.
+  useEffect(() => {
+    const timer = setTimeout(() => updateEditorConfig(editor, config))
+    return () => clearTimeout(timer)
+  }, [editor, config])
 
   // Search has no latency requirement, so a slow device may skip the
   // intermediate values of a fast typist entirely. `literal` turns off
@@ -122,130 +43,13 @@ export function EditorExtensions({
   }, [editor, deferredSearchQuery])
 
   useExtension(
+    useMemo(() => (onDocChange ? defineDocChangeHandler(onDocChange) : null), [onDocChange]),
+  )
+  useExtension(
     useMemo(
       () => (onSearchChange ? defineSearchStatusHandler(onSearchChange) : null),
       [onSearchChange],
     ),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return readOnly ? defineReadonly() : null
-    }, [readOnly]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onDocChange ? defineDocChangeHandler(onDocChange) : null
-    }, [onDocChange]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onWikilinkClick ? defineWikilinkClickHandler(onWikilinkClick) : null
-    }, [onWikilinkClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onLinkClick ? defineLinkClickHandler(onLinkClick) : null
-    }, [onLinkClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onTagClick ? defineTagClickHandler(onTagClick) : null
-    }, [onTagClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      // Mod-Enter follows the link under the caret through the same handlers
-      // a click uses.
-      return onWikilinkClick || onTagClick || onFileClick || onLinkClick || onImageClick
-        ? defineFollowLinkHandler({
-            onWikilinkClick,
-            onTagClick,
-            onFileClick,
-            onLinkClick,
-            onImageClick,
-          })
-        : null
-    }, [onWikilinkClick, onTagClick, onFileClick, onLinkClick, onImageClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onExitBoundary ? defineExitBoundaryHandler(onExitBoundary) : null
-    }, [onExitBoundary]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return defineImage({ resolveImageUrl })
-    }, [resolveImageUrl]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return defineFileView({ resolveFileInfo })
-    }, [resolveFileInfo]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onFileClick ? defineFileClickHandler(onFileClick) : null
-    }, [onFileClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onFilePaste ? defineFilePaste({ onFilePaste, onFileSaveError }) : null
-    }, [onFilePaste, onFileSaveError]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return onImageClick ? defineImageClickHandler(onImageClick) : null
-    }, [onImageClick]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return embedPaste ? defineEmbedPaste() : null
-    }, [embedPaste]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return linkPaste ? defineLinkPaste() : null
-    }, [linkPaste]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return bulletAfterHeading ? defineBulletAfterHeading() : null
-    }, [bulletAfterHeading]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return substitution ? defineSubstitution() : null
-    }, [substitution]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      // 'doc' so the placeholder shows only when the whole document is empty,
-      // not in every empty block the caret enters.
-      return placeholder ? definePlaceholder({ placeholder, strategy: 'doc' }) : null
-    }, [placeholder]),
-  )
-
-  useExtension(
-    useMemo(() => {
-      return wikilinkEnabled ? defineWikilinkTrigger() : null
-    }, [wikilinkEnabled]),
   )
 
   return null

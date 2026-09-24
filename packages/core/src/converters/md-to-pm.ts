@@ -75,7 +75,7 @@ export function markdownToDoc(
 
   const tree = gfmBlockOnlyParser.parse(rest)
   const cursor = tree.cursor()
-  const blocks = collectBlocks(nodes, cursor, rest, 0)
+  const blocks = collectBlocks(nodes, cursor, rest, 0, rest !== markdown)
 
   return nodes.doc(frontmatterBody === undefined ? {} : { frontmatter: frontmatterBody }, blocks)
 }
@@ -100,18 +100,30 @@ function matchFrontmatter(
 }
 
 /**
- * Walk the current node's children, converting each block-level child
- * and flattening any node converter that returns multiple siblings
- * (lists are the main case).
+ * Walk the document's children, converting each block-level child and
+ * flattening any node converter that returns multiple siblings (lists are the
+ * main case). Blank lines before the first block and after the last one are
+ * content too, one empty paragraph each; when a frontmatter block was peeled
+ * off ahead of `text`, the first leading blank line is that block's separator.
  */
 function collectBlocks(
   nodes: TypedNodeBuilders,
   cursor: TreeCursor,
   text: string,
   column: number,
+  afterFrontmatter: boolean,
 ): ProseMirrorNode[] {
   const out: ProseMirrorNode[] = []
-  if (!cursor.firstChild()) return out
+  if (!cursor.firstChild()) {
+    // A document holds at least one block: the empty document is one empty paragraph.
+    appendEmptyParagraphs(out, nodes, Math.max(1, countNewlines(text, 0, text.length)))
+    return out
+  }
+  appendEmptyParagraphs(
+    out,
+    nodes,
+    countNewlines(text, 0, cursor.from) - (afterFrontmatter ? 1 : 0),
+  )
   let previousTo: number | undefined
   do {
     if (previousTo != null) appendGapParagraphs(out, nodes, text, previousTo, cursor.from)
@@ -119,6 +131,9 @@ function collectBlocks(
     appendBlocks(out, nodes, convertBlock(nodes, cursor, text, column))
   } while (cursor.nextSibling())
   cursor.parent()
+  // The last line's own terminator is not a blank line.
+  const end = text.endsWith('\n') ? text.length - 1 : text.length
+  appendEmptyParagraphs(out, nodes, countNewlines(text, previousTo, end))
   return out
 }
 
@@ -166,11 +181,23 @@ function appendGapParagraphs(
   gapFrom: number,
   gapTo: number,
 ): void {
-  let newlineCount = 0
-  for (let i = gapFrom; i < gapTo; i++) {
-    if (text.charCodeAt(i) === CHAR_LINE_FEED) newlineCount++
+  appendEmptyParagraphs(out, nodes, countNewlines(text, gapFrom, gapTo) - 2)
+}
+
+function appendEmptyParagraphs(
+  out: ProseMirrorNode[],
+  nodes: TypedNodeBuilders,
+  count: number,
+): void {
+  for (let i = 0; i < count; i++) out.push(nodes.paragraph())
+}
+
+function countNewlines(text: string, from: number, to: number): number {
+  let count = 0
+  for (let i = from; i < to; i++) {
+    if (text.charCodeAt(i) === CHAR_LINE_FEED) count++
   }
-  for (let i = 2; i < newlineCount; i++) out.push(nodes.paragraph())
+  return count
 }
 
 function convertBlock(
@@ -527,6 +554,11 @@ function convertHTMLComment(
 /**
  * A blockquote's children start at column 0: every column an enclosing container
  * wrote sits in front of the `> ` marker on the line, and comes off with it.
+ *
+ * Blank quote lines before the first block and after the last one are empty
+ * paragraphs, like the document's own edges. The quote's range ends on its last
+ * line rather than after it, so every newline in the trailing slice is a blank
+ * line, and a quote made of markers only has one more line than newlines.
  */
 function convertBlockquote(
   nodes: TypedNodeBuilders,
@@ -534,16 +566,27 @@ function convertBlockquote(
   text: string,
 ): ProseMirrorNode {
   const content: ProseMirrorNode[] = []
+  const from = cursor.from
+  const to = cursor.to
+  let previousTo: number | undefined
   if (cursor.firstChild()) {
-    let previousTo: number | undefined
     do {
       if (cursor.type.id === LEZER_NODE_IDS.QuoteMark) continue
-      if (previousTo != null) appendGapParagraphs(content, nodes, text, previousTo, cursor.from)
+      if (previousTo == null) {
+        appendEmptyParagraphs(content, nodes, countNewlines(text, from, cursor.from))
+      } else {
+        appendGapParagraphs(content, nodes, text, previousTo, cursor.from)
+      }
       previousTo = cursor.to
       appendBlocks(content, nodes, convertBlock(nodes, cursor, text, 0))
     } while (cursor.nextSibling())
     cursor.parent()
   }
+  appendEmptyParagraphs(
+    content,
+    nodes,
+    previousTo == null ? countNewlines(text, from, to) + 1 : countNewlines(text, previousTo, to),
+  )
   return nodes.blockquote(content)
 }
 
@@ -554,16 +597,26 @@ function convertList(
   column: number,
   kind: 'bullet' | 'ordered',
 ): ProseMirrorNode[] {
-  const items: ProseMirrorNode[] = []
+  const out: ProseMirrorNode[] = []
   if (cursor.firstChild()) {
+    // One blank line between two items only makes the list loose; each further
+    // one is an empty paragraph between the items, which the flat list model
+    // holds as a sibling of the two `list` nodes. The gap is measured from the
+    // item's last block, not the item's end: in a blockquote the item's range
+    // swallows the `>` of the blank lines after it.
+    let previousContentEnd: number | undefined
     do {
-      if (cursor.type.id === LEZER_NODE_IDS.ListItem) {
-        items.push(convertListItem(nodes, cursor, text, column, kind))
+      if (cursor.type.id !== LEZER_NODE_IDS.ListItem) continue
+      if (previousContentEnd != null) {
+        appendGapParagraphs(out, nodes, text, previousContentEnd, cursor.from)
       }
+      const [item, contentEnd] = convertListItem(nodes, cursor, text, column, kind)
+      out.push(item)
+      previousContentEnd = contentEnd
     } while (cursor.nextSibling())
     cursor.parent()
   }
-  return items
+  return out
 }
 
 /**
@@ -631,13 +684,33 @@ function convertTaskItem(
   return { checked, taskMarker, paragraph }
 }
 
+/**
+ * The gap between a list marker ending at `markTo` and the item's first content
+ * at `contentFrom`. Only content that opens on the marker's own line measures a
+ * gap; an item whose content starts on the next line takes the canonical single
+ * space, the column its own continuation lines are indented to. A gap of 5+ is
+ * indented code (a different node, so the content's column would be the code
+ * block's), and 1 is the canonical default; only a 2-4 space gap is a faithful,
+ * content-preserving variation.
+ */
+function measureMarkerGap(
+  text: string,
+  contentFrom: number,
+  markTo: number | undefined,
+  markEndColumn: number,
+): number {
+  const onMarkLine = markTo != null && text.lastIndexOf('\n', contentFrom - 1) < markTo
+  const gap = onMarkLine ? measureContentColumn(text, contentFrom) - markEndColumn : 1
+  return gap >= 2 && gap <= 4 ? gap : 1
+}
+
 function convertListItem(
   nodes: TypedNodeBuilders,
   cursor: TreeCursor,
   text: string,
   column: number,
   kind: 'bullet' | 'ordered',
-): ProseMirrorNode {
+): [item: ProseMirrorNode, contentEnd: number] {
   const content: ProseMirrorNode[] = []
 
   let taskChecked: boolean | undefined
@@ -647,16 +720,15 @@ function convertListItem(
   let markWidth = 1
   let markTo: number | undefined
   let markEndColumn = 0
-  // The gap between the marker and the content. A gap of 5+ is indented code (a
-  // different node, so the first child's column would be the code block's), and 1 is
-  // the canonical default; only a 2-4 space gap is a faithful, content-preserving
-  // variation.
   let markerGap = 1
   // The item's blocks are indented past the marker on every line but the first,
   // on top of whatever the enclosing containers already add. Both the marker and
   // the gap are known once the first block after the mark is reached.
   let contentColumn = column + markWidth + markerGap
-  let sawContent = false
+  // The end of the previous block, once the item has one. Blank lines between
+  // an item's blocks are empty paragraphs, as between any siblings; a blank
+  // quote line's `QuoteMark` sits in the gap and is counted through it.
+  let previousTo: number | undefined
 
   if (cursor.firstChild()) {
     do {
@@ -672,16 +744,13 @@ function convertListItem(
         markEndColumn = measureContentColumn(text, cursor.to)
         continue
       }
-      if (!sawContent) {
-        sawContent = true
-        // Only content that opens on the marker's own line measures a gap; an
-        // item whose content starts on the next line takes the canonical single
-        // space, the column its own continuation lines are indented to.
-        const onMarkLine = markTo != null && text.lastIndexOf('\n', cursor.from - 1) < markTo
-        const gap = onMarkLine ? measureContentColumn(text, cursor.from) - markEndColumn : 1
-        markerGap = gap >= 2 && gap <= 4 ? gap : 1
+      if (previousTo == null) {
+        markerGap = measureMarkerGap(text, cursor.from, markTo, markEndColumn)
         contentColumn = column + markWidth + markerGap
+      } else {
+        appendGapParagraphs(content, nodes, text, previousTo, cursor.from)
       }
+      previousTo = cursor.to
       if (kind === 'bullet' && cursor.type.id === LEZER_NODE_IDS.Task) {
         const task = convertTaskItem(nodes, cursor, text, contentColumn)
         taskChecked = task.checked
@@ -709,7 +778,7 @@ function convertListItem(
     taskMarker,
     markerGap,
   }
-  return nodes.list(attrs, content)
+  return [nodes.list(attrs, content), previousTo ?? cursor.to]
 }
 
 function convertCodeBlock(

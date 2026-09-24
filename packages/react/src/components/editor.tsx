@@ -6,12 +6,16 @@ import type {
   FilePasteOptions,
   FileViewOptions,
   ImageClickHandler,
+  XPostMediaClickHandler,
+  YouTubeVideoClickHandler,
   ImageOptions,
   LinkClickHandler,
   LinkCopyHandler,
   LinkPreviewResolver,
   MarkMode,
   PlaceholderOptions,
+  XPostResolver,
+  YouTubeVideoResolver,
   SearchStatusHandler,
   StartPendingReplacementOptions,
   TagClickHandler,
@@ -20,6 +24,7 @@ import type {
   WikilinkResolver,
 } from '@meowdown/core'
 import type { SelectionJSON } from '@prosekit/core'
+import type { ReactNodeViewComponent } from '@prosekit/react'
 import { clsx } from 'clsx/lite'
 import {
   useImperativeHandle,
@@ -185,15 +190,14 @@ export interface EditorProps {
    * inline pill (file icon, name, size) instead of a link, behaves as one
    * caret unit, and reports clicks through `onFileClick` instead of
    * `onLinkClick`. The markdown text is untouched. Must be pure (same link,
-   * same answer). Read once when the editor is created: later identity
-   * changes are ignored, like `initialMarkdown`.
+   * same answer). Changing the resolver reparses existing content.
    */
   resolveFileLink?: FileLinkResolver
 
   /**
    * Classifies `![[target]]` as an image, file, or note atom. Return
    * `undefined` for missing or ambiguous targets to leave the source literal
-   * and editable. Must be pure and is read once when the editor is created.
+   * and editable. Must be pure; changing it reparses existing content.
    */
   resolveWikiEmbed?: WikiEmbedResolver
 
@@ -202,8 +206,8 @@ export interface EditorProps {
    * handlers receive and the label its chip shows. Meowdown reads no syntax
    * inside the brackets, so an alias form such as `[[target|alias]]` is
    * split here by the host. Return `undefined` to use the bracketed text as
-   * both; the markdown text is untouched either way. Must be pure and is
-   * read once when the editor is created.
+   * both; the markdown text is untouched either way. Must be pure; changing
+   * it reparses existing content.
    */
   resolveWikilink?: WikilinkResolver
 
@@ -215,6 +219,25 @@ export interface EditorProps {
    * (e.g. from `useCallback`).
    */
   resolveFileInfo?: FileViewOptions['resolveFileInfo']
+
+  /**
+   * Resolve the data behind an X post URL.
+   * Keep the function stable (for example, with `useCallback`). When omitted, public
+   * posts use `defaultResolveXPost` through react-tweet's hosted proxy.
+   */
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+
+  /**
+   * Resolves the data behind a YouTube video URL, directly or as a promise;
+   * the video renders as a `meowdown-embed-youtube` card. Defaults to
+   * `defaultResolveYouTubeVideo`, which reads YouTube's oEmbed endpoint. Pass
+   * a stable function (e.g. from `useCallback`).
+   */
+  resolveYouTubeVideo?: YouTubeVideoResolver
 
   /**
    * Called when the user clicks a rendered file pill (or presses `Mod-Enter`
@@ -242,6 +265,26 @@ export interface EditorProps {
    * Pass a stable function (e.g. from `useCallback`).
    */
   onImageClick?: ImageClickHandler
+
+  /**
+   * Called with the `meowdown-embed-media-click` event when the user
+   * activates a photo or video inside an X post card. Its `detail` holds the
+   * item, its siblings, and the rendered thumbnail element. Call
+   * `event.preventDefault()` to stop the card from opening the photo URL or
+   * playing the video in place, then show the media yourself, for example in
+   * a lightbox. Pass a stable function (e.g. from `useCallback`).
+   */
+  onXPostMediaClick?: XPostMediaClickHandler
+
+  /**
+   * Called with the `meowdown-embed-youtube-click` event when the user
+   * activates the poster of a YouTube card. Its `detail` holds the video, the
+   * player URL, and the rendered thumbnail element. Call
+   * `event.preventDefault()` to stop the card from playing the video in
+   * place, then play it yourself, for example in a lightbox. Pass a stable
+   * function (e.g. from `useCallback`).
+   */
+  onYouTubeVideoClick?: YouTubeVideoClickHandler
 
   /**
    * Auto-embeds a pasted tweet or YouTube link as a rich embed; one undo turns
@@ -337,6 +380,12 @@ export interface EditorProps {
   wrapperClassName?: string
 
   /**
+   * React component that renders code blocks in place of the built-in one.
+   * `false` disables the React code block view.
+   */
+  CodeBlockView?: ReactNodeViewComponent | false | undefined
+
+  /**
    * Imperative handle for the editor.
    */
   handleRef?: Ref<EditorHandle>
@@ -375,10 +424,15 @@ export function MeowdownEditor({
   resolveWikiEmbed,
   resolveWikilink,
   resolveFileInfo,
+  resolveXPost,
+  mediaUrlProtocols,
+  resolveYouTubeVideo,
   onFileClick,
   onFilePaste,
   onFileSaveError,
   onImageClick,
+  onXPostMediaClick,
+  onYouTubeVideoClick,
   embedPaste = true,
   linkPaste = true,
   bulletAfterHeading = false,
@@ -394,6 +448,7 @@ export function MeowdownEditor({
   timeFormat,
   editorClassName,
   wrapperClassName,
+  CodeBlockView,
   handleRef,
   children,
 }: EditorProps): ReactElement {
@@ -512,10 +567,15 @@ export function MeowdownEditor({
         resolveWikiEmbed={resolveWikiEmbed}
         resolveWikilink={resolveWikilink}
         resolveFileInfo={resolveFileInfo}
+        resolveXPost={resolveXPost}
+        mediaUrlProtocols={mediaUrlProtocols}
+        resolveYouTubeVideo={resolveYouTubeVideo}
         onFileClick={onFileClick}
         onFilePaste={onFilePaste}
         onFileSaveError={onFileSaveError}
         onImageClick={onImageClick}
+        onXPostMediaClick={onXPostMediaClick}
+        onYouTubeVideoClick={onYouTubeVideoClick}
         embedPaste={embedPaste}
         linkPaste={linkPaste}
         bulletAfterHeading={bulletAfterHeading}
@@ -529,6 +589,7 @@ export function MeowdownEditor({
         onSearchChange={onSearchChange}
         timeFormat={timeFormat}
         editorClassName={editorClassName}
+        CodeBlockView={CodeBlockView}
       >
         {children}
       </ProseKitEditor>

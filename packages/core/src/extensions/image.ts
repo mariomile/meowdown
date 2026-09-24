@@ -1,5 +1,10 @@
+import { registerXPost, type Resolver } from '@meowdown/embed/x'
+import { registerYouTubeVideo } from '@meowdown/embed/youtube'
+import { matchEmbed, type EmbedKind } from '@meowdown/markdown'
+import type { XPost, YouTubeVideo } from '@post-embed/types'
 import { defineMarkView, type PlainExtension } from '@prosekit/core'
 import type { Mark } from '@prosekit/pm/model'
+import type { EditorState } from '@prosekit/pm/state'
 import type { EditorView, MarkView, ViewMutationRecord } from '@prosekit/pm/view'
 import {
   registerResizableHandleElement,
@@ -9,7 +14,6 @@ import {
 
 import { NON_PROSE_ATTRS } from '../utils/non-prose-attrs.ts'
 
-import { listenForTweetHeight, matchEmbed, type EmbedDescriptor } from './embed.ts'
 import type { MdImageAttrs } from './inline-marks.ts'
 import {
   formatMagicComment,
@@ -19,7 +23,14 @@ import {
 } from './magic-comment.ts'
 import type { MarkName } from './mark-names.ts'
 import { getMarkRangeAt } from './mark-range.ts'
-import { applyTweetHeight } from './tweet.ts'
+import {
+  defaultResolveXPost,
+  defaultResolveYouTubeVideo,
+  parsePostEmbedSnapshot,
+  type PostEmbedSnapshot,
+  type XPostResolver,
+  type YouTubeVideoResolver,
+} from './post-embed.ts'
 import { formatSizedWikiEmbed, parseWikiEmbed } from './wiki-embed.ts'
 
 type ImageUrlResolver = (src: string) => string | undefined
@@ -34,12 +45,20 @@ export interface ImageOptions {
    */
   resolveImageUrl?: ImageUrlResolver
   /**
-   * Whether to write the height a tweet embed reports back into the trailing
-   * size comment, so the next load can seed the iframe at its final height.
-   * Defaults to `true`; disable when the document must never change without a
-   * user edit (e.g. deterministic tests).
+   * Resolve the data behind an X post URL.
+   * When omitted, public posts use `defaultResolveXPost`.
    */
-  persistTweetHeight?: boolean
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  /**
+   * Resolve the data behind a YouTube video URL, rendered as a
+   * `meowdown-embed-youtube` card. Defaults to `defaultResolveYouTubeVideo`,
+   * which reads YouTube's oEmbed endpoint.
+   */
+  resolveYouTubeVideo?: YouTubeVideoResolver
 }
 
 /**
@@ -53,33 +72,6 @@ export function defaultResolveImageUrl(src: string): string | undefined {
  * Default cap on an image's displayed height in CSS pixels.
  */
 const MAX_DISPLAY_HEIGHT = 500
-
-/**
- * Build the iframe DOM for an embed descriptor and start its height listener.
- * A persisted tweet height seeds the iframe before `Tweet.html` reports the
- * real one, so a revisited tweet keeps its space instead of shifting layout.
- */
-function buildEmbedIframe(
-  embed: EmbedDescriptor,
-  height: number | null,
-  onHeight?: (height: number) => void,
-): HTMLIFrameElement {
-  const iframe = document.createElement('iframe')
-  iframe.src = embed.src
-  iframe.title = embed.title
-  iframe.className = embed.className
-  iframe.dataset.testid = embed.testid
-  iframe.loading = 'lazy'
-  iframe.referrerPolicy = 'strict-origin-when-cross-origin'
-  iframe.setAttribute('frameborder', '0')
-  if (embed.allow) iframe.allow = embed.allow
-  if (embed.allowFullscreen) iframe.allowFullscreen = true
-  if (embed.kind === 'tweet') {
-    applyTweetHeight(iframe, height)
-    listenForTweetHeight(iframe, onHeight)
-  }
-  return iframe
-}
 
 /**
  * Write a persisted display size onto a resizable resizable root.
@@ -180,43 +172,68 @@ function commitImageSize(
 }
 
 /**
- * Ignore reported tweet heights this close to the persisted one. Fonts, theme,
- * and container width nudge the rendered height by a few pixels per device;
- * writing those back would churn the document on every open.
+ * Persist a resized width into the trailing magic comment. A card's height is
+ * its content's, so any persisted height is dropped rather than carried over.
  */
-const TWEET_HEIGHT_TOLERANCE = 8
+function commitEmbedWidth(view: EditorView, content: HTMLElement, rawWidth: number): void {
+  const pos = view.posAtDOM(content, 0)
+  const range = getMarkRangeAt(view.state, pos, 'mdImage')
+  if (!range) return
+  rewriteMagicComment(view, range, { width: Math.round(rawWidth), height: undefined }, true)
+}
 
 /**
- * Persist the height a tweet embed reported, so the next load can seed the
- * iframe before the tweet renders. A passive metadata write: outside undo
- * history, skipped in read-only views, and skipped inside the tolerance.
+ * Persist a resolved snapshot into the trailing magic comment. The whole
+ * `![alt](src)<!-- ... -->` range is rewritten, not just the comment: the
+ * transaction stays out of history, and undoing the edit that inserted the
+ * image must delete the snapshot with it. prosemirror-history maps the
+ * inverse deletion through this step, and a position at the end of a
+ * replaced range maps to the end of the replacement, so the mapped deletion
+ * covers the comment. An insertion at the range end would survive that undo
+ * as an orphan comment rendered as plain text.
  */
-function commitTweetHeight(view: EditorView, content: HTMLElement, height: number): void {
-  if (!view.editable || !content.isConnected) return
+function commitSnapshot(
+  view: EditorView,
+  content: HTMLElement,
+  src: string,
+  snapshot: PostEmbedSnapshot,
+): void {
   const pos = view.posAtDOM(content, 0)
   const range = getMarkRangeAt(view.state, pos, 'mdImage')
   if (!range) return
   const attrs = range.mark.attrs as MdImageAttrs
-  if (attrs.height != null && Math.abs(height - attrs.height) <= TWEET_HEIGHT_TOLERANCE) return
-  rewriteMagicComment(view, range, { height: Math.round(height) }, false)
+  if (attrs.src !== src) return
+
+  const current = view.state.doc.textBetween(range.from, range.to)
+  const base = stripMagicComment(current)
+  const comment = formatMagicComment({ ...parseMagicComment(current.slice(base.length)), snapshot })
+  if (base + comment === current) return
+
+  view.dispatch(
+    view.state.tr.insertText(base + comment, range.from, range.to).setMeta('addToHistory', false),
+  )
 }
 
 class ImageMarkView implements MarkView {
   readonly #dom: HTMLElement
   readonly #contentDOM: HTMLElement
   readonly #view: EditorView
-  readonly #resolveImageUrl: ImageUrlResolver | undefined
-  readonly #persistTweetHeight: boolean
+  #resolveImageUrl: ImageUrlResolver | undefined
+  #resolveXPost: XPostResolver
+  #mediaUrlProtocols: string[] | undefined
+  #resolveYouTubeVideo: YouTubeVideoResolver
   #attrs: MdImageAttrs
   #resizableRoot: HTMLElement | undefined
   #image: HTMLImageElement | undefined
-  #tweetIframe: HTMLIFrameElement | undefined
+  #destroyed = false
 
   constructor(mark: Mark, view: EditorView, options: ImageOptions) {
     this.#attrs = mark.attrs as MdImageAttrs
     this.#view = view
     this.#resolveImageUrl = options.resolveImageUrl
-    this.#persistTweetHeight = options.persistTweetHeight ?? true
+    this.#resolveXPost = options.resolveXPost ?? defaultResolveXPost
+    this.#mediaUrlProtocols = options.mediaUrlProtocols
+    this.#resolveYouTubeVideo = options.resolveYouTubeVideo ?? defaultResolveYouTubeVideo
 
     this.#dom = document.createElement('span')
     this.#dom.className = 'md-image-view md-atom-view'
@@ -248,8 +265,9 @@ class ImageMarkView implements MarkView {
   update(mark: Mark): boolean {
     const next = mark.attrs as MdImageAttrs
     const previous = this.#attrs
-    // False rebuilds the view from the constructor; a new src can change the preview shape.
-    if (next.src !== previous.src) return false
+    // False rebuilds the view from the constructor: a new src can change the
+    // preview shape, and a new snapshot switches the card to its data path.
+    if (next.src !== previous.src || next.snapshot !== previous.snapshot) return false
     this.#attrs = next
     if (this.#image && next.alt !== previous.alt) {
       this.#image.alt = next.alt
@@ -261,9 +279,6 @@ class ImageMarkView implements MarkView {
         applySize(this.#resizableRoot, next.width, next.height)
       }
     }
-    if (this.#tweetIframe && next.height !== previous.height) {
-      applyTweetHeight(this.#tweetIframe, next.height)
-    }
     return true
   }
 
@@ -271,52 +286,90 @@ class ImageMarkView implements MarkView {
     return !this.#contentDOM.contains(mutation.target)
   }
 
+  destroy(): void {
+    this.#destroyed = true
+  }
+
   /**
-   * Build the inline preview for the image `src`: an embed iframe or a resizable `<img>`.
+   * Build the inline preview for the image `src`: a post-embed card or a
+   * resizable `<img>`.
    */
   #renderPreview(): HTMLElement | undefined {
     const { src } = this.#attrs
-    const embed = matchEmbed(src)
-    if (embed) {
-      const wrapper = document.createElement('span')
-      wrapper.className = 'md-image-view-preview md-atom-view-preview'
-      const onHeight = this.#persistTweetHeight
-        ? (height: number) => {
-            commitTweetHeight(this.#view, this.#contentDOM, height)
-          }
-        : undefined
-      const iframe = buildEmbedIframe(embed, this.#attrs.height, onHeight)
-      if (embed.kind === 'tweet') this.#tweetIframe = iframe
-      wrapper.appendChild(embed.kind === 'youtube' ? this.#buildResizableEmbed(iframe) : iframe)
+    const wrapper = document.createElement('span')
+    wrapper.className = 'md-image-view-preview md-atom-view-preview'
+    const kind = matchEmbed(src)
+    if (kind) {
+      wrapper.dataset.testid = `${kind}-embed`
+      wrapper.dataset.postEmbed = kind
+      wrapper.appendChild(this.#buildPostEmbed(kind, src))
       return wrapper
     }
 
     const url = (this.#resolveImageUrl ?? defaultResolveImageUrl)(src)
     if (!url) return undefined
-
-    const wrapper = document.createElement('span')
-    wrapper.className = 'md-image-view-preview md-atom-view-preview'
     wrapper.dataset.testid = 'image-preview'
     wrapper.appendChild(this.#buildResizableImage(url))
     return wrapper
   }
 
   /**
-   * A resizable YouTube embed: the same resizable web component as images, with
-   * the player's fixed 16:9 ratio, so a drag only ever picks a width. Releasing
-   * a drag writes the size into the markdown source as a
-   * `<!-- {"width":N,"height":M} -->` comment, exactly like an image.
+   * Resolve X cards from their URL; YouTube cards may reuse a saved snapshot.
    */
-  #buildResizableEmbed(iframe: HTMLIFrameElement): HTMLElement {
+  #buildPostEmbed(kind: EmbedKind, src: string): HTMLElement {
+    const saved =
+      this.#attrs.snapshot == null ? undefined : parsePostEmbedSnapshot(this.#attrs.snapshot)
+    if (kind === 'x-post') {
+      registerXPost()
+      const element = document.createElement('meowdown-embed-x')
+      element.mediaUrlProtocols = this.#mediaUrlProtocols ?? null
+      element.resolver = this.#resolveXPost
+      element.url = src
+      return element
+    }
+    registerYouTubeVideo()
+    const element = document.createElement('meowdown-embed-youtube')
+    element.playback = 'inline'
+    element.data = saved?.kind === 'youtube-video' ? saved.data : null
+    element.resolver = this.#persisting(kind, this.#resolveYouTubeVideo)
+    element.url = src
+    return this.#buildResizableVideo(element)
+  }
+
+  /**
+   * Wrap a resolver so its first valid answer is persisted under `kind`.
+   * post-embed only calls it while `data` is null, and logs a rejection
+   * itself.
+   */
+  #persisting<T extends XPost | YouTubeVideo>(kind: EmbedKind, resolver: Resolver<T>): Resolver<T> {
+    return (url) => {
+      const result = resolver(url)
+      void Promise.resolve(result).then(
+        (value) => {
+          if (this.#destroyed || value == null) return
+          const snapshot = parsePostEmbedSnapshot({ kind, data: value })
+          if (snapshot) commitSnapshot(this.#view, this.#contentDOM, url, snapshot)
+        },
+        () => {},
+      )
+      return result
+    }
+  }
+
+  /**
+   * A resizable video card: the same resizable web component as images, but
+   * only the dragged width is persisted, as `<!-- {"width":N} -->`; the card
+   * keeps its content height.
+   */
+  #buildResizableVideo(element: HTMLElement): HTMLElement {
     registerResizableRootElement()
     registerResizableHandleElement()
 
     const root = document.createElement('prosekit-resizable-root')
     root.className = 'md-embed-resizable'
     root.dataset.testid = 'embed-resizable'
-    root.setAttribute('data-aspect-ratio', String(16 / 9))
-    applySize(root, this.#attrs.width, this.#attrs.height)
-    root.appendChild(iframe)
+    applySize(root, this.#attrs.width, null)
+    root.appendChild(element)
 
     const handle = document.createElement('prosekit-resizable-handle')
     handle.className = 'md-image-resize-handle'
@@ -326,8 +379,7 @@ class ImageMarkView implements MarkView {
     root.appendChild(handle)
 
     root.addEventListener('resizeEnd', (event) => {
-      const { width: nextWidth, height: nextHeight } = (event as ResizeEndEvent).detail
-      commitImageSize(this.#view, this.#contentDOM, nextWidth, nextHeight)
+      commitEmbedWidth(this.#view, this.#contentDOM, (event as ResizeEndEvent).detail.width)
     })
 
     this.#resizableRoot = root
@@ -398,9 +450,11 @@ class ImageMarkView implements MarkView {
  * `![alt](src)<!-- {"width":320,"height":240} -->`, which round-trips as
  * plain Markdown.
  */
-export function defineImage(options: ImageOptions = {}): PlainExtension {
+export function defineImage(
+  getOptions?: (state: EditorState) => ImageOptions | undefined,
+): PlainExtension {
   return defineMarkView({
     name: 'mdImage' satisfies MarkName,
-    constructor: (mark, view) => new ImageMarkView(mark, view, options),
+    constructor: (mark, view) => new ImageMarkView(mark, view, getOptions?.(view.state) ?? {}),
   }) as PlainExtension
 }

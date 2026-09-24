@@ -8,9 +8,10 @@ import { useQueryStates } from 'nuqs'
 import { NuqsAdapter } from 'nuqs/adapters/react'
 import { useEffect, useRef, useState } from 'react'
 
+import { DemoLightbox } from '../components/demo-lightbox.tsx'
+import { useDemoLightbox } from '../components/use-demo-lightbox.ts'
 import { WikilinkPreviewCard } from '../components/wikilink-preview-card.tsx'
 import {
-  handleImageClick,
   handleLinkClick,
   handleTagClick,
   handleWikilinkClick,
@@ -160,6 +161,9 @@ function MainEditorDemo() {
     flushToSource()
   }
 
+  const { lightbox, handleImageClick, handleXPostMediaClick, handleYouTubeVideoClick } =
+    useDemoLightbox()
+
   const toggleSource = (show: boolean) => {
     if (show) {
       setSourceSeed(editorRef.current?.getMarkdown() ?? '')
@@ -216,6 +220,8 @@ function MainEditorDemo() {
             onTagSearch={searchTags}
             onWikilinkSearch={searchNotes}
             onImageClick={handleImageClick}
+            onXPostMediaClick={handleXPostMediaClick}
+            onYouTubeVideoClick={handleYouTubeVideoClick}
             onLinkClick={handleLinkClick}
             resolveLinkPreview={resolveLinkPreview}
             onTagClick={handleTagClick}
@@ -237,6 +243,7 @@ function MainEditorDemo() {
           </div>
         )}
       </div>
+      <DemoLightbox lightbox={lightbox} />
     </div>
   )
 }

@@ -50,11 +50,89 @@ describe('markdownToDoc', () => {
     })
   })
 
-  it('skips leading and trailing blank lines', () => {
+  it('materializes empty paragraphs from leading and trailing blank lines', () => {
     expect(markdownToDoc('\n\na\n\n\n').toJSON()).toEqual({
       type: 'doc',
       attrs: { frontmatter: null },
-      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }],
+      content: [
+        { type: 'paragraph' },
+        { type: 'paragraph' },
+        { type: 'paragraph', content: [{ type: 'text', text: 'a' }] },
+        { type: 'paragraph' },
+        { type: 'paragraph' },
+      ],
+    })
+  })
+
+  it('reads a document of blank lines as empty paragraphs', () => {
+    const empty = { type: 'doc', attrs: { frontmatter: null }, content: [{ type: 'paragraph' }] }
+    expect(markdownToDoc('').toJSON()).toEqual(empty)
+    expect(markdownToDoc('\n').toJSON()).toEqual(empty)
+    expect(markdownToDoc('\n\n').toJSON()).toEqual({
+      type: 'doc',
+      attrs: { frontmatter: null },
+      content: [{ type: 'paragraph' }, { type: 'paragraph' }],
+    })
+  })
+
+  it('reads the blank line after frontmatter as a separator', () => {
+    const paragraph = { type: 'paragraph', content: [{ type: 'text', text: 'a' }] }
+    expect(markdownToDoc('---\nt: x\n---\n\na', { frontmatter: true }).toJSON()).toEqual({
+      type: 'doc',
+      attrs: { frontmatter: 't: x' },
+      content: [paragraph],
+    })
+    expect(markdownToDoc('---\nt: x\n---\n\n\n\na', { frontmatter: true }).toJSON()).toEqual({
+      type: 'doc',
+      attrs: { frontmatter: 't: x' },
+      content: [{ type: 'paragraph' }, { type: 'paragraph' }, paragraph],
+    })
+  })
+
+  it('materializes empty paragraphs from a blank-line run inside a list item', () => {
+    const doc = markdownToDoc('- a\n\n\n\n  b')
+    expect(doc.childCount).toBe(1)
+    expect(doc.child(0).toJSON()).toMatchObject({
+      type: 'list',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'a' }] },
+        { type: 'paragraph' },
+        { type: 'paragraph' },
+        { type: 'paragraph', content: [{ type: 'text', text: 'b' }] },
+      ],
+    })
+  })
+
+  it('splits a list at a blank-line run between items', () => {
+    const doc = markdownToDoc('- a\n\n\n- b')
+    expect(doc.childCount).toBe(3)
+    expect(doc.child(0).type.name).toBe('list')
+    expect(doc.child(1).toJSON()).toEqual({ type: 'paragraph' })
+    expect(doc.child(2).type.name).toBe('list')
+  })
+
+  it('keeps a loose list together', () => {
+    const doc = markdownToDoc('- a\n\n- b')
+    expect(doc.childCount).toBe(2)
+    expect(doc.child(0).type.name).toBe('list')
+    expect(doc.child(1).type.name).toBe('list')
+  })
+
+  it('materializes empty paragraphs from blank quote lines at the edges', () => {
+    expect(markdownToDoc('>\n>\n> a\n>').toJSON()).toEqual({
+      type: 'doc',
+      attrs: { frontmatter: null },
+      content: [
+        {
+          type: 'blockquote',
+          content: [
+            { type: 'paragraph' },
+            { type: 'paragraph' },
+            { type: 'paragraph', content: [{ type: 'text', text: 'a' }] },
+            { type: 'paragraph' },
+          ],
+        },
+      ],
     })
   })
 

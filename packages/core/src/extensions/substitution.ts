@@ -70,12 +70,13 @@ function applySubstitution(
   return tr
 }
 
-function defineSubstitutionInputRules(): PlainExtension {
+function defineSubstitutionInputRules(enabled?: (state: EditorState) => boolean): PlainExtension {
   return union(
     SUBSTITUTION_RULES.map((rule) => {
       const inputRegexp = new RegExp(String.raw`(?:${rule[0].source})\s$`)
       return defineInputRule(
         new InputRule(inputRegexp, (state, match, start, end) => {
+          if (enabled && !enabled(state)) return null
           return applySubstitution(state, start, end, rule, match[0])
         }),
       )
@@ -135,12 +136,14 @@ function defineSubstitutionUndo(): PlainExtension {
   return union(defineSubstitutionUndoPlugin(), defineSubstitutionUndoKeymap())
 }
 
-function defineSubstitutionEnterRules(): PlainExtension {
+function defineSubstitutionEnterRules(enabled?: (state: EditorState) => boolean): PlainExtension {
   return union(
     SUBSTITUTION_RULES.map((rule) => {
       return defineEnterRule({
         regex: new RegExp(`(?:${rule[0].source})$`),
-        handler: ({ state, from, to }) => applySubstitution(state, from, to, rule),
+        handler: ({ state, from, to }) => {
+          return enabled && !enabled(state) ? null : applySubstitution(state, from, to, rule)
+        },
       })
     }),
   )
@@ -149,10 +152,10 @@ function defineSubstitutionEnterRules(): PlainExtension {
 /**
  * Apply the editor's automatic plain-text substitutions.
  */
-export function defineSubstitution(): PlainExtension {
+export function defineSubstitution(enabled?: (state: EditorState) => boolean): PlainExtension {
   return union(
-    defineSubstitutionInputRules(),
+    defineSubstitutionInputRules(enabled),
     defineSubstitutionUndo(),
-    defineSubstitutionEnterRules(),
+    defineSubstitutionEnterRules(enabled),
   )
 }

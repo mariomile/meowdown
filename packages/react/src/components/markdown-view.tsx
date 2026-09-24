@@ -1,18 +1,20 @@
 import {
   collectReferenceDefinitions,
   defaultResolveImageUrl,
+  defaultResolveXPost,
+  defaultResolveYouTubeVideo,
   formatFileSize,
   getCodeTokens,
   getFileKind,
   getMarkBuilders,
   inlineTextToMarkChunksWithContext,
   isModEvent,
-  listenForTweetHeight,
+  isNodeOfType,
+  isReferenceDefinitionNode,
   markdownToDoc,
-  matchEmbed,
+  parsePostEmbedSnapshot,
   type CodeBlockAttrs,
   type CodeToken,
-  type EmbedDescriptor,
   type FileClickHandler,
   type FileInfoResolver,
   type FileLinkResolver,
@@ -29,11 +31,18 @@ import {
   type MdWikilinkAttrs,
   type MeowdownListAttrs,
   type NodeName,
+  type XPostResolver,
+  type YouTubeVideoResolver,
   type ReferenceDefinitions,
   type WikiEmbedResolver,
   type WikilinkClickHandler,
   type WikilinkResolver,
+  type XPostMediaClickHandler,
+  type YouTubeVideoClickHandler,
 } from '@meowdown/core'
+import { registerXPost, X_POST_MEDIA_CLICK } from '@meowdown/embed/x'
+import { registerYouTubeVideo, YOUTUBE_VIDEO_CLICK } from '@meowdown/embed/youtube'
+import { matchEmbed, type EmbedKind } from '@meowdown/markdown'
 import type { DOMOutputSpec } from '@prosekit/pm/model'
 import { Mark, type Node as ProseMirrorNode } from '@prosekit/pm/model'
 import { clsx } from 'clsx/lite'
@@ -41,9 +50,10 @@ import {
   cloneElement,
   createElement,
   Fragment,
+  memo,
+  useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type MouseEvent,
   type ReactElement,
@@ -148,6 +158,20 @@ export interface MarkdownViewProps {
    */
   resolveFileInfo?: FileInfoResolver
   /**
+   * Resolve the data behind an X post URL, rendered as a `meowdown-embed-x`
+   * card. Defaults to `defaultResolveXPost`.
+   */
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  /**
+   * Resolve the data behind a YouTube video URL, rendered as a
+   * `meowdown-embed-youtube` card. Defaults to `defaultResolveYouTubeVideo`.
+   */
+  resolveYouTubeVideo?: YouTubeVideoResolver
+  /**
    * Called when a rendered wikilink is clicked. Pass a stable function.
    */
   onWikilinkClick?: WikilinkClickHandler
@@ -159,6 +183,17 @@ export interface MarkdownViewProps {
    * Called when a rendered image is clicked. Pass a stable function.
    */
   onImageClick?: ImageClickHandler
+  /**
+   * Called when a photo or video inside an X post card is activated. Call
+   * `event.preventDefault()` to stop the card from opening the photo URL or
+   * playing the video in place.
+   */
+  onXPostMediaClick?: XPostMediaClickHandler
+  /**
+   * Called when the poster of a YouTube card is activated. Call
+   * `event.preventDefault()` to stop the card from playing the video in place.
+   */
+  onYouTubeVideoClick?: YouTubeVideoClickHandler
   /**
    * Called when a rendered file pill is clicked. Pass a stable function.
    */
@@ -173,7 +208,11 @@ export interface MarkdownViewProps {
   className?: string
 }
 
-interface RenderContext {
+/**
+ * The props every block renders with. One object per set of props, so a
+ * block's `memo` comparator can test it by identity.
+ */
+interface BlockContext {
   interactive: boolean
   expandCollapsed: boolean
   resolveImageUrl?: (src: string) => string | undefined
@@ -181,17 +220,29 @@ interface RenderContext {
   resolveWikiEmbed?: WikiEmbedResolver
   resolveWikilink?: WikilinkResolver
   resolveFileInfo?: FileInfoResolver
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  resolveYouTubeVideo?: YouTubeVideoResolver
   onWikilinkClick?: WikilinkClickHandler
   onLinkClick?: LinkClickHandler
   onImageClick?: ImageClickHandler
   onFileClick?: FileClickHandler
   onTaskClick?: TaskClickHandler
+}
+
+interface RenderContext extends BlockContext {
   referenceDefinitions: ReferenceDefinitions
-  referenceDefinitionNodes: ReadonlySet<ProseMirrorNode>
   /**
    * Document-order checkbox counter feeding {@link TaskClickPayload.index}.
+   * Starts at the block's `taskBase` so the index stays document-wide.
    */
   taskCounter: { value: number }
+  /**
+   * Per-block element key counter. Keys only need to be unique among siblings.
+   */
   keyCounter: { value: number }
 }
 
@@ -263,47 +314,48 @@ function WikilinkChip(props: {
   )
 }
 
-function EmbedFrame(props: {
-  embed: EmbedDescriptor
+function PostEmbed(props: {
+  kind: EmbedKind
+  src: string
   width: number | null
-  height: number | null
+  snapshot: object | null
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  resolveYouTubeVideo: YouTubeVideoResolver
 }): ReactElement {
-  const { embed, width, height } = props
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-  useEffect(() => {
-    if (embed.kind !== 'tweet') return
-    const iframe = iframeRef.current
-    if (!iframe) return
-    return listenForTweetHeight(iframe)
-  }, [embed.kind, embed.key])
-  // A persisted width narrows the player; the `aspect-ratio` CSS on
-  // `.md-embed-youtube` derives the height. Tweets stay fluid-width and seed
-  // their persisted height instead.
-  const youtubeWidth = embed.kind === 'youtube' ? width : null
-  const tweetHeight = embed.kind === 'tweet' ? height : null
+  const { kind, src, width, snapshot, resolveXPost, mediaUrlProtocols, resolveYouTubeVideo } = props
+  // Registration is idempotent and must precede the element so React sets
+  // `data`, `url`, and `resolver` as properties of the upgraded element.
+  registerXPost()
+  registerYouTubeVideo()
+  // A saved snapshot renders as is; the card only resolves while `data` is null.
+  const saved = snapshot == null ? undefined : parsePostEmbedSnapshot(snapshot)
   return (
-    <span className="md-image-view-preview md-atom-view-preview" contentEditable={false}>
-      <iframe
-        ref={iframeRef}
-        key={embed.key}
-        src={embed.src}
-        title={embed.title}
-        className={embed.className}
-        data-testid={embed.testid}
-        loading="lazy"
-        referrerPolicy="strict-origin-when-cross-origin"
-        frameBorder="0"
-        allow={embed.allow}
-        allowFullScreen={embed.allowFullscreen}
-        style={
-          youtubeWidth != null
-            ? { width: youtubeWidth }
-            : tweetHeight != null
-              ? { height: tweetHeight }
-              : undefined
-        }
-        data-sized={tweetHeight == null ? undefined : ''}
-      />
+    <span
+      className="md-image-view-preview md-atom-view-preview"
+      contentEditable={false}
+      data-testid={`${kind}-embed`}
+      data-post-embed={kind}
+    >
+      {kind === 'x-post'
+        ? createElement('meowdown-embed-x', {
+            data: null,
+            url: src,
+            resolver: resolveXPost ?? defaultResolveXPost,
+            mediaUrlProtocols: mediaUrlProtocols ?? null,
+          })
+        : createElement('meowdown-embed-youtube', {
+            data: saved?.kind === 'youtube-video' ? saved.data : null,
+            url: src,
+            resolver: resolveYouTubeVideo,
+            playback: 'inline',
+            // A persisted width from a resize in the editor; the card's own
+            // 550px cap only applies to the default width.
+            style: width == null ? undefined : { width, maxWidth: 'none' },
+          })}
     </span>
   )
 }
@@ -312,23 +364,54 @@ function ImagePreview(props: {
   src: string
   alt: string
   width: number | null
-  height: number | null
+  snapshot: object | null
   resolveImageUrl?: (src: string) => string | undefined
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  resolveYouTubeVideo?: YouTubeVideoResolver
   onImageClick?: ImageClickHandler
   interactive: boolean
 }): ReactElement | null {
-  const { src, alt, width, height, resolveImageUrl, onImageClick, interactive } = props
-  const embed = matchEmbed(src)
-  if (embed) return interactive ? <EmbedFrame embed={embed} width={width} height={height} /> : null
-
+  const {
+    src,
+    alt,
+    width,
+    snapshot,
+    resolveImageUrl,
+    resolveXPost,
+    mediaUrlProtocols,
+    resolveYouTubeVideo,
+    onImageClick,
+    interactive,
+  } = props
+  const kind = matchEmbed(src)
+  if (kind) {
+    if (!interactive) return null
+    return (
+      <PostEmbed
+        key={src}
+        kind={kind}
+        src={src}
+        width={width}
+        snapshot={snapshot}
+        resolveXPost={resolveXPost}
+        mediaUrlProtocols={mediaUrlProtocols}
+        resolveYouTubeVideo={resolveYouTubeVideo ?? defaultResolveYouTubeVideo}
+      />
+    )
+  }
   const url = (resolveImageUrl ?? defaultResolveImageUrl)(src)
   if (!url) return null
   const handleClick = onImageClick
-    ? (event: MouseEvent) => {
+    ? (event: MouseEvent<HTMLImageElement>) => {
         return onImageClick({
           src,
           alt,
           event: event.nativeEvent,
+          element: event.currentTarget,
           mod: isModEvent(event),
         })
       }
@@ -354,19 +437,22 @@ function ImageView(props: {
   src: string
   alt: string
   width: number | null
-  height: number | null
+  snapshot: object | null
   context: RenderContext
   children: ReactNode
 }): ReactElement {
-  const { src, alt, width, height, context, children } = props
+  const { src, alt, width, snapshot, context, children } = props
   return (
     <span className="md-image-view md-atom-view">
       <ImagePreview
         src={src}
         alt={alt}
         width={width}
-        height={height}
+        snapshot={snapshot}
         resolveImageUrl={context.resolveImageUrl}
+        resolveXPost={context.resolveXPost}
+        mediaUrlProtocols={context.mediaUrlProtocols}
+        resolveYouTubeVideo={context.resolveYouTubeVideo}
         onImageClick={context.onImageClick}
         interactive={context.interactive}
       />
@@ -579,7 +665,7 @@ function wrapMark(mark: Mark, children: ReactNode, context: RenderContext): Reac
           src={attrs.src}
           alt={attrs.alt}
           width={attrs.width}
-          height={attrs.height}
+          snapshot={attrs.snapshot}
           context={context}
         >
           {children}
@@ -677,10 +763,7 @@ function renderInline(node: ProseMirrorNode, context: RenderContext): ReactNode 
       resolveWikiEmbed: context.resolveWikiEmbed,
       resolveWikilink: context.resolveWikilink,
     },
-    {
-      referenceDefinitions: context.referenceDefinitions,
-      isReferenceDefinition: context.referenceDefinitionNodes.has(node),
-    },
+    { referenceDefinitions: context.referenceDefinitions },
   )
   // Sort each chunk's marks into ProseMirror's canonical order so the grouping
   // and nesting match the editor.
@@ -733,8 +816,13 @@ function renderCodeBlock(node: ProseMirrorNode, key: number): ReactNode {
   return <CodeBlock key={key} code={node.textContent} language={language} />
 }
 
-function renderBlock(node: ProseMirrorNode, context: RenderContext): ReactNode {
-  if (context.referenceDefinitionNodes.has(node)) return null
+function renderBlock(
+  node: ProseMirrorNode,
+  context: RenderContext,
+  parent: ProseMirrorNode | null,
+  index: number,
+): ReactNode {
+  if (isReferenceDefinitionNode(node, parent, index)) return null
 
   const key = context.keyCounter.value++
   const typeName = node.type.name as NodeName
@@ -762,7 +850,9 @@ function renderBlock(node: ProseMirrorNode, context: RenderContext): ReactNode {
     )
   }
 
-  const children: ReactNode[] = node.content.content.map((child) => renderBlock(child, context))
+  const children: ReactNode[] = node.content.content.map((child, childIndex) => {
+    return renderBlock(child, context, node, childIndex)
+  })
 
   const reactNode = toDOM ? (
     outputSpecToReact(toDOM(node), children, context)
@@ -782,6 +872,91 @@ function renderBlock(node: ProseMirrorNode, context: RenderContext): ReactNode {
 
   return reactNode
 }
+
+function isTaskList(node: ProseMirrorNode): boolean {
+  return isNodeOfType(node, 'list') && (node.attrs as MeowdownListAttrs).kind === 'task'
+}
+
+/**
+ * Checkboxes a block renders, in the same pre-order `renderBlock` walks, so a
+ * block's first checkbox index is the sum over the blocks before it.
+ */
+function countTaskItems(node: ProseMirrorNode): number {
+  let count = isTaskList(node) ? 1 : 0
+  node.descendants((child) => {
+    if (isTaskList(child)) count++
+    return true
+  })
+  return count
+}
+
+/**
+ * The effective definitions as one string, so blocks can compare them by
+ * content: `collectReferenceDefinitions` builds a new map on every parse.
+ */
+function definitionsSignature(definitions: ReferenceDefinitions): string {
+  let signature = ''
+  for (const { key, href, title } of definitions.values()) {
+    signature += `${key}\0${href}\0${title}\n`
+  }
+  return signature
+}
+
+interface Block {
+  node: ProseMirrorNode
+  /**
+   * Checkboxes rendered by the blocks before this one.
+   */
+  taskBase: number
+}
+
+function splitBlocks(doc: ProseMirrorNode): Block[] {
+  const blocks: Block[] = []
+  let taskBase = 0
+  for (const node of doc.content.content) {
+    blocks.push({ node, taskBase })
+    taskBase += countTaskItems(node)
+  }
+  return blocks
+}
+
+interface MarkdownBlockProps {
+  node: ProseMirrorNode
+  taskBase: number
+  context: BlockContext
+  referenceDefinitions: ReferenceDefinitions
+  definitionsKey: string
+}
+
+/**
+ * One top-level block. Memoized on the block's own content (`Node.eq`), its
+ * first checkbox index, the shared props object, and the definitions'
+ * content, so a growing document re-renders only the block that changed.
+ */
+const MarkdownBlock = memo(
+  function MarkdownBlock({
+    node,
+    taskBase,
+    context,
+    referenceDefinitions,
+  }: MarkdownBlockProps): ReactNode {
+    const renderContext: RenderContext = {
+      ...context,
+      referenceDefinitions,
+      taskCounter: { value: taskBase },
+      keyCounter: { value: 0 },
+    }
+    return renderBlock(node, renderContext, null, 0)
+  },
+  (previous, next) => {
+    return (
+      previous.taskBase === next.taskBase &&
+      previous.context === next.context &&
+      previous.definitionsKey === next.definitionsKey &&
+      (previous.node === next.node || previous.node.eq(next.node))
+    )
+  },
+)
 
 /**
  * Render Markdown to a read-only React tree that looks exactly like the editor
@@ -805,17 +980,20 @@ export function MarkdownView({
   resolveWikiEmbed,
   resolveWikilink,
   resolveFileInfo,
+  resolveXPost,
+  mediaUrlProtocols,
+  resolveYouTubeVideo,
   onWikilinkClick,
   onLinkClick,
   onImageClick,
+  onXPostMediaClick,
+  onYouTubeVideoClick,
   onFileClick,
   onTaskClick,
   className,
 }: MarkdownViewProps): ReactElement {
-  const content = useMemo(() => {
-    const doc = markdownToDoc(markdown, { frontmatter })
-    const referenceIndex = collectReferenceDefinitions(doc)
-    const context: RenderContext = {
+  const context = useMemo<BlockContext>(
+    () => ({
       interactive,
       expandCollapsed,
       resolveImageUrl,
@@ -823,37 +1001,83 @@ export function MarkdownView({
       resolveWikiEmbed,
       resolveWikilink,
       resolveFileInfo,
+      resolveXPost,
+      mediaUrlProtocols,
+      resolveYouTubeVideo,
       onWikilinkClick: interactive ? onWikilinkClick : undefined,
       onLinkClick: interactive ? onLinkClick : undefined,
       onImageClick: interactive ? onImageClick : undefined,
       onFileClick: interactive ? onFileClick : undefined,
       onTaskClick: interactive ? onTaskClick : undefined,
-      referenceDefinitions: referenceIndex.definitions,
-      referenceDefinitionNodes: referenceIndex.nodes,
-      taskCounter: { value: 0 },
-      keyCounter: { value: 0 },
+    }),
+    [
+      interactive,
+      expandCollapsed,
+      resolveImageUrl,
+      resolveFileLink,
+      resolveWikiEmbed,
+      resolveWikilink,
+      resolveFileInfo,
+      resolveXPost,
+      mediaUrlProtocols,
+      resolveYouTubeVideo,
+      onWikilinkClick,
+      onLinkClick,
+      onImageClick,
+      onFileClick,
+      onTaskClick,
+    ],
+  )
+
+  const { blocks, referenceDefinitions, definitionsKey } = useMemo(() => {
+    const doc = markdownToDoc(markdown, { frontmatter })
+    const referenceDefinitions = collectReferenceDefinitions(doc).definitions
+    return {
+      blocks: splitBlocks(doc),
+      referenceDefinitions,
+      definitionsKey: definitionsSignature(referenceDefinitions),
     }
-    return doc.content.content.map((node) => renderBlock(node, context))
-  }, [
-    markdown,
-    frontmatter,
-    interactive,
-    expandCollapsed,
-    resolveImageUrl,
-    resolveFileLink,
-    resolveWikiEmbed,
-    resolveWikilink,
-    resolveFileInfo,
-    onWikilinkClick,
-    onLinkClick,
-    onImageClick,
-    onFileClick,
-    onTaskClick,
-  ])
+  }, [markdown, frontmatter])
+
+  // The cards' events bubble, so one listener each on the root covers every card.
+  const handleXPostMediaClick = interactive ? onXPostMediaClick : undefined
+  const handleYouTubeVideoClick = interactive ? onYouTubeVideoClick : undefined
+  const rootRef = useCallback(
+    (root: HTMLDivElement) => {
+      if (handleXPostMediaClick) {
+        root.addEventListener(X_POST_MEDIA_CLICK, handleXPostMediaClick)
+      }
+      if (handleYouTubeVideoClick) {
+        root.addEventListener(YOUTUBE_VIDEO_CLICK, handleYouTubeVideoClick)
+      }
+      return () => {
+        if (handleXPostMediaClick) {
+          root.removeEventListener(X_POST_MEDIA_CLICK, handleXPostMediaClick)
+        }
+        if (handleYouTubeVideoClick) {
+          root.removeEventListener(YOUTUBE_VIDEO_CLICK, handleYouTubeVideoClick)
+        }
+      }
+    },
+    [handleXPostMediaClick, handleYouTubeVideoClick],
+  )
 
   return (
-    <div className={clsx('ProseMirror', 'meowdown-content', className)} data-mark-mode={markMode}>
-      {content}
+    <div
+      ref={rootRef}
+      className={clsx('ProseMirror', 'meowdown-content', className)}
+      data-mark-mode={markMode}
+    >
+      {blocks.map(({ node, taskBase }, index) => (
+        <MarkdownBlock
+          key={index}
+          node={node}
+          taskBase={taskBase}
+          context={context}
+          referenceDefinitions={referenceDefinitions}
+          definitionsKey={definitionsKey}
+        />
+      ))}
     </div>
   )
 }

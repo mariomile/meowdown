@@ -21,10 +21,6 @@ export function handleLinkClick({ href }: { href: string }): void {
   confirmAndOpen('this link', href)
 }
 
-export function handleImageClick({ src }: { src: string }): void {
-  confirmAndOpen('this image', src)
-}
-
 export function handleTagClick({ tag }: { tag: string }): void {
   window.alert(`Clicked tag: #${tag}`)
 }
@@ -71,7 +67,7 @@ export function resolveFileLink({ href }: { href: string }): boolean {
 
 export async function resolveFileInfo(href: string): Promise<{ size: number } | undefined> {
   // Simulate a stat round-trip so the size visibly fills in after the pill.
-  await new Promise((resolve) => setTimeout(resolve, 300))
+  await sleep(300)
   const size = FILE_SIZE_BY_HREF.get(href)
   return size == null ? undefined : { size }
 }
@@ -94,7 +90,7 @@ const TAGS = ['cats', 'editor', 'ideas', 'markdown', 'meow', 'notes', 'react', '
 
 export async function searchTags(query: string): Promise<TagItem[]> {
   // Simulate network latency so the tag menu's loading state shows up.
-  await new Promise((resolve) => setTimeout(resolve, 200))
+  await sleep(200)
   return TAGS.filter((tag) => tag.includes(query)).map((tag) => ({ tag }))
 }
 
@@ -109,7 +105,7 @@ const NOTES = [
 
 export async function searchNotes(query: string): Promise<WikilinkItem[]> {
   // Simulate network latency so the wikilink menu's loading state shows up.
-  await new Promise((resolve) => setTimeout(resolve, 200))
+  await sleep(200)
   const normalizedQuery = query.toLowerCase()
   const items: WikilinkItem[] = NOTES.filter((note) => {
     return note.toLowerCase().includes(normalizedQuery)

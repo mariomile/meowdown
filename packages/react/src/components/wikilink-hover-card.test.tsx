@@ -1,5 +1,7 @@
 import '../testing/index.ts'
 
+import type { WikilinkHoverHit } from '@meowdown/core'
+import { sleep } from '@ocavue/utils'
 import { createRef, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
@@ -24,7 +26,7 @@ function HostPreviewCard() {
 }
 
 describe('WikilinkHoverCard', () => {
-  it('opens after a 300ms dwell and closes on leave', async () => {
+  it('opens after a 300ms delay and closes on leave', async () => {
     await unhover()
     await render(
       <MeowdownEditor initialMarkdown="see [[Note]] here" blockHandle={false}>
@@ -40,25 +42,28 @@ describe('WikilinkHoverCard', () => {
     await expect.element(card).not.toBeInTheDocument()
   })
 
-  it('restarts the dwell when the pointer moves to an adjacent target', async () => {
+  it('never renders a link the pointer only passed through', async () => {
     await unhover()
+    const targets: string[] = []
+    const renderBody = (hit: WikilinkHoverHit) => {
+      targets.push(hit.target)
+      return <div data-testid="hover-body">Preview: {hit.target}</div>
+    }
     await render(
       <MeowdownEditor
         initialMarkdown="[[Alpha|A wide alias]][[Beta|Another wide alias]]"
         resolveWikilink={resolveWikilinkAlias}
         blockHandle={false}
       >
-        <HostPreviewCard />
+        <WikilinkHoverCard>{renderBody}</WikilinkHoverCard>
       </MeowdownEditor>,
     )
     const links = pmRoot.getByTestId('wikilink')
 
     await hover(links.nth(0))
-    await new Promise((resolve) => setTimeout(resolve, 200))
     await hover(links.nth(1))
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    await expect.element(card).not.toBeInTheDocument()
-    await expect.element(card, { timeout: 1000 }).toHaveTextContent('Preview: Beta')
+    await expect.element(card, { timeout: 2000 }).toHaveTextContent('Preview: Beta')
+    expect(targets).not.toContain('Alpha')
   })
 
   it('moves the open card to the next hovered link', async () => {
@@ -89,7 +94,7 @@ describe('WikilinkHoverCard', () => {
     const links = pmRoot.getByTestId('wikilink')
 
     await hover(links.nth(0))
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await sleep(500)
     await expect.element(card).not.toBeInTheDocument()
 
     await hover(links.nth(1))
@@ -102,7 +107,7 @@ describe('WikilinkHoverCard', () => {
       <MeowdownEditor initialMarkdown="see [[Note]] here" blockHandle={false}>
         <WikilinkHoverCard>
           {async (hit) => {
-            await new Promise((resolve) => setTimeout(resolve, 50))
+            await sleep(50)
             return <div>Async preview: {hit.target}</div>
           }}
         </WikilinkHoverCard>
@@ -120,7 +125,7 @@ describe('WikilinkHoverCard', () => {
       <MeowdownEditor initialMarkdown="see [[Missing]] here" blockHandle={false}>
         <WikilinkHoverCard>
           {async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50))
+            await sleep(50)
             return null
           }}
         </WikilinkHoverCard>
@@ -128,7 +133,7 @@ describe('WikilinkHoverCard', () => {
     )
 
     await hover(pmRoot.getByTestId('wikilink'))
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
     await expect.element(card).not.toBeInTheDocument()
   })
 
@@ -139,7 +144,7 @@ describe('WikilinkHoverCard', () => {
       <MeowdownEditor initialMarkdown="see [[Broken]] here" blockHandle={false}>
         <WikilinkHoverCard>
           {async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50))
+            await sleep(50)
             throw new Error('load failed')
           }}
         </WikilinkHoverCard>
@@ -147,7 +152,7 @@ describe('WikilinkHoverCard', () => {
     )
 
     await hover(pmRoot.getByTestId('wikilink'))
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
     await expect.element(card).not.toBeInTheDocument()
     expect(consoleError).toHaveBeenCalledWith(
       '[meowdown] wikilink hover card body rejected:',
@@ -175,7 +180,7 @@ describe('WikilinkHoverCard', () => {
     await vi.waitFor(() => expect(resolveBody).toBeDefined())
     await unhover()
     resolveBody?.(<div>Late preview</div>)
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleep(200)
     await expect.element(card).not.toBeInTheDocument()
   })
 
@@ -201,7 +206,7 @@ describe('WikilinkHoverCard', () => {
     await vi.waitFor(() => expect(resolvers.has('Beta')).toBe(true))
 
     resolvers.get('Alpha')?.(<div>Preview: Alpha</div>)
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await sleep(100)
     await expect.element(card).not.toBeInTheDocument()
 
     resolvers.get('Beta')?.(<div>Preview: Beta</div>)

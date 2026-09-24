@@ -1,5 +1,62 @@
 # Changelog
 
+This file stops at 0.71.2. Later releases are recorded per package: [`@meowdown/core`](packages/core/CHANGELOG.md), [`@meowdown/react`](packages/react/CHANGELOG.md), [`@meowdown/markdown`](packages/markdown/CHANGELOG.md).
+
+## [0.71.2](https://github.com/prosekit/meowdown/compare/v0.71.1...v0.71.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* stop clipping post-embed cards in the preview wrapper ([#570](https://github.com/prosekit/meowdown/issues/570)) ([85331ba](https://github.com/prosekit/meowdown/commit/85331ba5bdc5ae2882d3ef7207092083184db178))
+
+## [0.71.1](https://github.com/prosekit/meowdown/compare/v0.71.0...v0.71.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* keep post-embed card clicks out of `onImageClick` ([#567](https://github.com/prosekit/meowdown/issues/567)) ([333d4d1](https://github.com/prosekit/meowdown/commit/333d4d195d7f39187ab2011834c931aad926e4f0))
+
+## [0.71.0](https://github.com/prosekit/meowdown/compare/v0.70.1...v0.71.0) (2026-09-14)
+
+
+### Features
+
+* render X archives through host resolvers ([#565](https://github.com/prosekit/meowdown/issues/565)) ([7cd9316](https://github.com/prosekit/meowdown/commit/7cd93166cb2f273ab28f08afe3707987a8afce73))
+
+## [0.70.1](https://github.com/prosekit/meowdown/compare/v0.70.0...v0.70.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* give unsized YouTube previews a default width ([#560](https://github.com/prosekit/meowdown/issues/560)) ([54cb416](https://github.com/prosekit/meowdown/commit/54cb4163f0bfe9930b58607903189536c79aaaef))
+* match the selection outline radius to the post-embed card ([#561](https://github.com/prosekit/meowdown/issues/561)) ([e057cb6](https://github.com/prosekit/meowdown/commit/e057cb6407ab918e9d8c7d2875a2bd39dd4f49b5))
+
+## [0.70.0](https://github.com/prosekit/meowdown/compare/v0.69.0...v0.70.0) (2026-09-12)
+
+
+### Features
+
+* **core:** persist post-embed snapshots in the magic comment ([#558](https://github.com/prosekit/meowdown/issues/558)) ([b07990b](https://github.com/prosekit/meowdown/commit/b07990be94303fd13c5bf1819be5e3807bc0a5d6))
+* render X posts and YouTube videos without iframe ([#556](https://github.com/prosekit/meowdown/issues/556)) ([bd59257](https://github.com/prosekit/meowdown/commit/bd592575d91c5b34a66f30ce9975d80f292edfb1))
+* render X posts from the post-embed `XPost` snapshot ([#559](https://github.com/prosekit/meowdown/issues/559)) ([1f453a4](https://github.com/prosekit/meowdown/commit/1f453a4ab4dd1cb6b84a94e178b1597b7d516bd0))
+
+## [0.69.0](https://github.com/prosekit/meowdown/compare/v0.68.3...v0.69.0) (2026-09-12)
+
+
+### Features
+
+* keep empty paragraphs inside a list item ([#551](https://github.com/prosekit/meowdown/issues/551)) ([db7087e](https://github.com/prosekit/meowdown/commit/db7087e165e9cf170549d653dc1c05a859609f92))
+* keep leading and trailing empty paragraphs ([#550](https://github.com/prosekit/meowdown/issues/550)) ([6bc4e90](https://github.com/prosekit/meowdown/commit/6bc4e901fd37a841ce62aac61426e3d1ee976aff))
+* **react:** add `CodeBlockView` prop to `MeowdownEditor` ([#548](https://github.com/prosekit/meowdown/issues/548)) ([2f66e5e](https://github.com/prosekit/meowdown/commit/2f66e5eb8a08ab95ff15ed9ab95142c20d6374ae))
+* read a blank-line run between list items as empty paragraphs ([#552](https://github.com/prosekit/meowdown/issues/552)) ([46f7ffd](https://github.com/prosekit/meowdown/commit/46f7ffdbb7fd04b2bb42a56c4fe84cfc1ca8de81))
+
+## [0.68.3](https://github.com/prosekit/meowdown/compare/v0.68.2...v0.68.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **react:** polish the link editor popover ([#545](https://github.com/prosekit/meowdown/issues/545)) ([db472c1](https://github.com/prosekit/meowdown/commit/db472c1b3c5ccd320d7860e1033ce88a261a4d29))
+
 ## [0.68.2](https://github.com/prosekit/meowdown/compare/v0.68.1...v0.68.2) (2026-09-08)
 
 

@@ -16,8 +16,19 @@ interface ImageHit {
   alt: string
 }
 
-function getClosestImagePreview(target: EventTarget | null): HTMLElement | false | null {
-  return target instanceof HTMLElement && target.closest('.md-image-view-preview')
+/**
+ * The image preview wrapper around `target`, or nothing when the wrapper holds
+ * a post-embed card: its links and controls have their own click behavior.
+ */
+function getClosestImagePreview(target: EventTarget | null): HTMLElement | undefined {
+  if (!(target instanceof HTMLElement)) return
+  const preview = target.closest<HTMLElement>('.md-image-view-preview')
+  if (!preview || preview.dataset.postEmbed != null) return
+  return preview
+}
+
+function getPreviewImage(preview: HTMLElement): HTMLImageElement | undefined {
+  return preview.querySelector('img') ?? undefined
 }
 
 export function findImageAt(state: EditorState, pos: number): ImageHit | undefined {
@@ -56,6 +67,11 @@ export interface ImageClickPayload {
    * from it; a touch surface delivers the `touchend` instead of a click.
    */
   event: MouseEvent | TouchEvent | KeyboardEvent
+  /**
+   * The rendered `<img>` of a click or tap, for example to zoom a lightbox
+   * from. A key press has none.
+   */
+  element?: HTMLImageElement | undefined
   /**
    * Whether the platform's mod key (`Command` on Apple, `Ctrl` elsewhere) was held
    * beyond the gesture that triggered the activation.
@@ -101,12 +117,16 @@ function isWithinTapTolerance(pending: PendingTap, touch: Touch): boolean {
  * raises the software keyboard before the handler opens its own surface
  * (such as a lightbox).
  */
-export function defineImageClickHandler(onClick: ImageClickHandler): PlainExtension {
+export function defineImageClickHandler(
+  getOnClick?: (state: EditorState) => ImageClickHandler | undefined,
+): PlainExtension {
   const pendingTaps = new WeakMap<EditorView, PendingTap>()
 
   const handleTouchEnd = (view: EditorView, event: TouchEvent): boolean => {
+    const handler = getOnClick?.(view.state)
     const pending = pendingTaps.get(view)
     pendingTaps.delete(view)
+    if (!handler) return false
     if (!pending || event.touches.length > 0) return false
     const touch = findTouch(event.changedTouches, pending.identifier)
     if (!touch || !isWithinTapTolerance(pending, touch)) return false
@@ -116,7 +136,15 @@ export function defineImageClickHandler(onClick: ImageClickHandler): PlainExtens
     // handler fires here instead of in handleClick.
     event.preventDefault()
     const hit = findImageForPreview(view, preview)
-    if (hit) onClick({ src: hit.src, alt: hit.alt, event, mod: isModEvent(event) })
+    if (hit) {
+      handler({
+        src: hit.src,
+        alt: hit.alt,
+        event,
+        element: getPreviewImage(preview),
+        mod: isModEvent(event),
+      })
+    }
     return true
   }
 
@@ -126,6 +154,7 @@ export function defineImageClickHandler(onClick: ImageClickHandler): PlainExtens
       props: {
         handleDOMEvents: {
           pointerdown: (view, event) => {
+            if (!getOnClick?.(view.state)) return false
             if (getClosestImagePreview(event.target) && event.pointerType !== 'mouse') {
               // Clickable image previews live inside the editor contenteditable. On touch surfaces,
               // tapping a rendered image can let the browser focus the editor on pointerdown before
@@ -136,6 +165,7 @@ export function defineImageClickHandler(onClick: ImageClickHandler): PlainExtens
             return false
           },
           touchstart: (view, event) => {
+            if (!getOnClick?.(view.state)) return false
             pendingTaps.delete(view)
             if (event.touches.length !== 1) return false
             if (!getClosestImagePreview(event.target)) return false
@@ -169,11 +199,19 @@ export function defineImageClickHandler(onClick: ImageClickHandler): PlainExtens
           touchend: handleTouchEnd,
         },
         handleClick: (view, _pos, event) => {
+          const handler = getOnClick?.(view.state)
+          if (!handler) return false
           const preview = getClosestImagePreview(event.target)
           if (!preview) return false
           const hit = findImageForPreview(view, preview)
           if (!hit) return false
-          onClick({ src: hit.src, alt: hit.alt, event, mod: isModEvent(event) })
+          handler({
+            src: hit.src,
+            alt: hit.alt,
+            event,
+            element: getPreviewImage(preview),
+            mod: isModEvent(event),
+          })
           return true
         },
       },

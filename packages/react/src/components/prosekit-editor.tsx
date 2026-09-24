@@ -6,13 +6,15 @@ import {
   isNodeOfType,
   markdownToDoc,
   type AcceptPendingReplacementOptions,
-  type EditorExtension,
+  type EditorConfig,
   type ExitBoundaryHandler,
   type FileClickHandler,
   type FileLinkResolver,
   type FilePasteOptions,
   type FileViewOptions,
   type ImageClickHandler,
+  type XPostMediaClickHandler,
+  type YouTubeVideoClickHandler,
   type ImageOptions,
   type LinkClickHandler,
   type LinkCopyHandler,
@@ -26,12 +28,14 @@ import {
   type WikiEmbedResolver,
   type WikilinkClickHandler,
   type WikilinkResolver,
+  type XPostResolver,
+  type YouTubeVideoResolver,
 } from '@meowdown/core'
 import { clamp } from '@ocavue/utils'
 import { createEditor, union, type SelectionJSON } from '@prosekit/core'
 import type { EditorNode } from '@prosekit/pm/model'
 import { Selection, TextSelection } from '@prosekit/pm/state'
-import { ProseKit } from '@prosekit/react'
+import { ProseKit, type ReactNodeViewComponent } from '@prosekit/react'
 import GithubSlugger from 'github-slugger'
 import {
   useCallback,
@@ -209,17 +213,17 @@ export interface ProseKitEditorProps {
   resolveImageUrl?: ImageOptions['resolveImageUrl']
 
   /**
-   * Claims links as file pills. Read once on mount; see `EditorProps.resolveFileLink`.
+   * Claims links as file pills. Updates existing content; see `EditorProps.resolveFileLink`.
    */
   resolveFileLink?: FileLinkResolver
 
   /**
-   * Classifies wiki embeds. Read once on mount; see `EditorProps.resolveWikiEmbed`.
+   * Classifies wiki embeds. Updates existing content; see `EditorProps.resolveWikiEmbed`.
    */
   resolveWikiEmbed?: WikiEmbedResolver
 
   /**
-   * Resolves wikilink targets and labels. Read once on mount; see `EditorProps.resolveWikilink`.
+   * Resolves wikilink targets and labels. Updates existing content; see `EditorProps.resolveWikilink`.
    */
   resolveWikilink?: WikilinkResolver
 
@@ -227,6 +231,18 @@ export interface ProseKitEditorProps {
    * Resolves the size shown on a file pill. See `EditorProps.resolveFileInfo`.
    */
   resolveFileInfo?: FileViewOptions['resolveFileInfo']
+  /**
+   * Resolves the data behind an X post URL. See `EditorProps.resolveXPost`.
+   */
+  resolveXPost?: XPostResolver
+  /**
+   * Additional trusted protocols for X media URLs, such as `reflect-asset:`.
+   */
+  mediaUrlProtocols?: string[]
+  /**
+   * Resolves the data behind a YouTube video URL. See `EditorProps.resolveYouTubeVideo`.
+   */
+  resolveYouTubeVideo?: YouTubeVideoResolver
 
   /**
    * Called on click or Mod-Enter of a rendered file pill. See `EditorProps.onFileClick`.
@@ -247,6 +263,16 @@ export interface ProseKitEditorProps {
    * Called on click of a rendered image. See `EditorProps.onImageClick`.
    */
   onImageClick?: ImageClickHandler
+
+  /**
+   * Called on click of an X post card's photo or video. See `EditorProps.onXPostMediaClick`.
+   */
+  onXPostMediaClick?: XPostMediaClickHandler
+
+  /**
+   * Called on click of a YouTube card's poster. See `EditorProps.onYouTubeVideoClick`.
+   */
+  onYouTubeVideoClick?: YouTubeVideoClickHandler
 
   /**
    * Auto-embeds a pasted tweet/YouTube link. See `EditorProps.embedPaste`.
@@ -313,6 +339,8 @@ export interface ProseKitEditorProps {
    */
   editorClassName?: string
 
+  CodeBlockView?: ReactNodeViewComponent | false | undefined
+
   /**
    * Imperative handle for the editor.
    */
@@ -346,10 +374,15 @@ export function ProseKitEditor({
   resolveWikiEmbed,
   resolveWikilink,
   resolveFileInfo,
+  resolveXPost,
+  mediaUrlProtocols,
+  resolveYouTubeVideo,
   onFileClick,
   onFilePaste,
   onFileSaveError,
   onImageClick,
+  onXPostMediaClick,
+  onYouTubeVideoClick,
   embedPaste,
   linkPaste,
   bulletAfterHeading,
@@ -363,27 +396,101 @@ export function ProseKitEditor({
   onSearchChange,
   timeFormat,
   editorClassName,
+  CodeBlockView,
   ref,
   children,
 }: ProseKitEditorProps): ReactElement {
-  const [editor] = useState((): TypedEditor => {
-    const baseExtension: EditorExtension = defineEditorExtension({
+  // Set while a programmatic setState/setMarkdown dispatch runs, so the
+  // doc-change handler can ignore it: a host replacing content already knows.
+  const suppressDocChangeRef = useRef(false)
+
+  // Guard the host callback so programmatic setState/setMarkdown stays silent.
+  // Stable per `onDocChange` identity, so the extension is not rebuilt every render.
+  const handleDocChange = useMemo(() => {
+    if (!onDocChange) return
+    return () => {
+      if (suppressDocChangeRef.current) return
+      onDocChange()
+    }
+  }, [onDocChange])
+
+  const wikilinkEnabled = !!onWikilinkSearch
+
+  const config = useMemo<EditorConfig>(
+    () => ({
+      markMode,
       resolveFileLink,
       resolveWikiEmbed,
       resolveWikilink,
+      onWikilinkClick,
+      onLinkClick,
+      onTagClick,
+      onExitBoundary,
+      resolveImageUrl,
+      resolveFileInfo,
+      resolveXPost,
+      mediaUrlProtocols,
+      resolveYouTubeVideo,
+      onFileClick,
+      onFilePaste,
+      onFileSaveError,
+      onImageClick,
+      onXPostMediaClick,
+      onYouTubeVideoClick,
+      embedPaste,
+      linkPaste,
+      bulletAfterHeading,
+      substitution,
+      placeholder,
+      readOnly,
+      spellCheck,
+      editorClassName,
+      wikilinkEnabled,
+    }),
+    [
       markMode,
-    })
-    const extension = union(baseExtension, defineCodeBlockView())
+      resolveFileLink,
+      resolveWikiEmbed,
+      resolveWikilink,
+      onWikilinkClick,
+      onLinkClick,
+      onTagClick,
+      onExitBoundary,
+      resolveImageUrl,
+      resolveFileInfo,
+      resolveXPost,
+      mediaUrlProtocols,
+      resolveYouTubeVideo,
+      onFileClick,
+      onFilePaste,
+      onFileSaveError,
+      onImageClick,
+      onXPostMediaClick,
+      onYouTubeVideoClick,
+      embedPaste,
+      linkPaste,
+      bulletAfterHeading,
+      substitution,
+      placeholder,
+      readOnly,
+      spellCheck,
+      editorClassName,
+      wikilinkEnabled,
+    ],
+  )
+
+  const [editor] = useState((): TypedEditor => {
+    const baseExtension = defineEditorExtension(config)
+    const extension =
+      CodeBlockView === false
+        ? baseExtension
+        : union(baseExtension, defineCodeBlockView(CodeBlockView))
     const editor: TypedEditor = createEditor({ extension })
     if (initialMarkdown) {
       editor.setContent(markdownToDoc(initialMarkdown, { nodes: editor.nodes, frontmatter }))
     }
     return editor
   })
-
-  // Set while a programmatic setState/setMarkdown dispatch runs, so the
-  // doc-change handler can ignore it: a host replacing content already knows.
-  const suppressDocChangeRef = useRef(false)
 
   // The selection the menu is open over, captured at open time so it survives
   // focus moving into the menu's filter input. Undefined while closed.
@@ -423,10 +530,11 @@ export function ProseKitEditor({
         const doc = markdownToDoc(markdown, { nodes: editor.nodes, frontmatter })
         const currentMarkdown = docToMarkdown(transaction.doc, { frontmatter })
         const nextMarkdown = docToMarkdown(doc, { frontmatter })
-        // Edge-only blank blocks intentionally normalize away in Markdown. An
-        // equivalent host echo must not replace the document and erase that
-        // transient editor structure; refreshMarkdownRendering forces the
-        // replacement when a caller explicitly needs one.
+        // A host echo of equivalent Markdown must not replace the document: the
+        // editor may hold structure Markdown cannot spell (a trailing empty
+        // paragraph inside a list item), and the caret would move.
+        // refreshMarkdownRendering forces the replacement when a caller
+        // explicitly needs one.
         if (forceMarkdown || currentMarkdown !== nextMarkdown) {
           transaction.replaceWith(0, transaction.doc.content.size, doc.content)
         } else if (!selection) {
@@ -524,16 +632,6 @@ export function ProseKitEditor({
     }
   }, [editor, frontmatter, hasSelectionMenu, openSelectionMenu])
 
-  // Guard the host callback so programmatic setState/setMarkdown stays silent.
-  // Stable per `onDocChange` identity, so the extension is not rebuilt every render.
-  const handleDocChange = useMemo(() => {
-    if (!onDocChange) return
-    return () => {
-      if (suppressDocChangeRef.current) return
-      onDocChange()
-    }
-  }, [onDocChange])
-
   return (
     <ProseKit editor={editor}>
       {/* Before the editor element, so a document height change below the
@@ -541,29 +639,10 @@ export function ProseKitEditor({
       <VirtualCaret />
       <div ref={editor.mount}></div>
       <EditorExtensions
-        markMode={markMode}
-        onDocChange={handleDocChange}
-        onWikilinkClick={onWikilinkClick}
-        onLinkClick={onLinkClick}
-        onTagClick={onTagClick}
-        onExitBoundary={onExitBoundary}
-        resolveImageUrl={resolveImageUrl}
-        resolveFileInfo={resolveFileInfo}
-        onFileClick={onFileClick}
-        onFilePaste={onFilePaste}
-        onFileSaveError={onFileSaveError}
-        onImageClick={onImageClick}
-        embedPaste={embedPaste}
-        linkPaste={linkPaste}
-        bulletAfterHeading={bulletAfterHeading}
-        substitution={substitution}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        wikilinkEnabled={!!onWikilinkSearch}
-        spellCheck={spellCheck}
+        config={config}
         searchQuery={searchQuery}
+        onDocChange={handleDocChange}
         onSearchChange={onSearchChange}
-        editorClassName={editorClassName}
       />
       {blockHandle && !readOnly && <BlockHandle />}
       {!readOnly && <TableHandle />}
